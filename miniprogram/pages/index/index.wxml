@@ -9,8 +9,8 @@
       <text class="status-text">{{serverConnected ? '已连接' : '未连接'}}</text>
     </view>
     <view class="status-row" wx:if="{{serverConnected}}">
-      <text class="status-label">Ollama 模型</text>
-      <text class="status-text small">{{ollamaModels.length > 0 ? ollamaModels.join(', ') : '无可用模型'}}</text>
+      <text class="status-label">ASR 引擎</text>
+      <text class="status-text small">{{asrProvider || 'unknown'}} / {{asrModel || 'unknown'}} {{zhipuConfigured ? '(已配置)' : '(未配置API Key)'}}</text>
     </view>
     <view class="server-url" bindtap="onEditServer">
       <text class="url-text">{{serverBase}}</text>
@@ -104,7 +104,7 @@
       <text class="help-item">1. 确保电脑已运行 backend/start.bat</text>
       <text class="help-item">2. 手机与电脑在同一 WiFi</text>
       <text class="help-item">3. 检查 IP 地址是否正确</text>
-      <text class="help-item">4. 运行 ollama pull whisper</text>
+      <text class="help-item">4. 检查后端是否配置 ZHIPU_API_KEY</text>
     </view>
   </view>
 

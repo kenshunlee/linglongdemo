@@ -50,12 +50,13 @@
 ASR_HOST=0.0.0.0
 PORT=8765
 ASR_OUTPUT_DIR=/tmp/output
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-WHISPER_MODEL=whisper
+ZHIPU_API_KEY=your_zhipu_api_key
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+ZHIPU_ASR_MODEL=glm-asr-2512
 FALLBACK_MODEL=phi3
 ```
 
-说明：云托管里通常没有 Ollama，本服务会自动走降级路径（`phi3-fallback` 或返回错误提示）。如果要真实 ASR，请将转写引擎改为云端可用服务。
+说明：当前主引擎为智谱 GLM-ASR-2512。若 `ZHIPU_API_KEY` 未配置或网络不可达，本服务会自动走降级路径（`phi3-fallback` 或返回错误提示）。
 
 ## 4. 配置微信网关路由
 
@@ -100,6 +101,7 @@ curl.exe -i https://api.yourdomain.com/asr/health
 1. 打开首页
 2. 触发健康检查
 3. 上传音频并查看 `history` 页面
+4. 确认状态中 `asr_provider=zhipu` 且 `zhipu_configured=true`
 
 ## 8. 备注
 

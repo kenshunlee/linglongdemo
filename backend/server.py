@@ -1,11 +1,10 @@
 """
 ASR 本地桥接服务（兼容版）
-功能：接收微信小程序上传的音频 → 调用 Ollama Whisper 转写 → 保存 txt 到 output/
+功能：接收微信小程序上传的音频 → 调用智谱 GLM-ASR-2512 转写 → 保存 txt 到 output/
 运行：python server.py
 依赖：pip install httpx python-multipart
 """
 
-import base64
 import json
 import logging
 import os
@@ -22,8 +21,9 @@ import httpx
 from multipart import parse_form
 
 # ------------------- 配置区 -------------------
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "whisper")
+ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
+ZHIPU_BASE_URL = os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
+ZHIPU_ASR_MODEL = os.getenv("ZHIPU_ASR_MODEL", "glm-asr-2512")
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "phi3")
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output"
 OUTPUT_DIR = Path(os.getenv("ASR_OUTPUT_DIR", str(DEFAULT_OUTPUT_DIR)))
@@ -45,23 +45,35 @@ def generate_filename() -> str:
     return "asr" + datetime.now().strftime("%Y%m%d%H%M%S")
 
 
-def transcribe_with_ollama_whisper(audio_path: str) -> str:
+def transcribe_with_zhipu_asr(audio_path: str) -> str:
+    if not ZHIPU_API_KEY:
+        raise ValueError("未配置 ZHIPU_API_KEY")
+
+    endpoint = f"{ZHIPU_BASE_URL.rstrip('/')}/audio/transcriptions"
+    headers = {"Authorization": f"Bearer {ZHIPU_API_KEY}"}
+
     with open(audio_path, "rb") as f:
-        audio_b64 = base64.b64encode(f.read()).decode()
+        files = {
+            "file": (Path(audio_path).name, f, "application/octet-stream")
+        }
+        data = {
+            "model": ZHIPU_ASR_MODEL,
+        }
 
-    payload = {
-        "model": WHISPER_MODEL,
-        "prompt": "",
-        "images": [],
-        "audio": audio_b64,
-        "stream": False,
-    }
-
-    with httpx.Client(timeout=120) as client:
-        resp = client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
+        with httpx.Client(timeout=120) as client:
+            resp = client.post(endpoint, headers=headers, data=data, files=files)
         resp.raise_for_status()
         data = resp.json()
-        return data.get("response", "").strip()
+
+    text = (
+        data.get("text")
+        or data.get("result")
+        or data.get("response")
+        or data.get("data", {}).get("text")
+    )
+    if not text:
+        raise ValueError(f"GLM-ASR 响应中未找到转写文本: {data}")
+    return str(text).strip()
 
 
 def transcribe_with_whisper_cpp(audio_path: str) -> str:
@@ -109,31 +121,20 @@ def transcribe_with_whisper_cpp(audio_path: str) -> str:
 
 def transcribe_with_phi3_mock(audio_path: str) -> str:
     file_size = os.path.getsize(audio_path)
-    payload = {
-        "model": FALLBACK_MODEL,
-        "prompt": (
-            f"[调试模式] 收到音频文件，大小 {file_size} 字节。"
-            "当前环境未检测到 Whisper 模型，请通过 `ollama pull whisper` 安装。"
-            "或安装 whisper.cpp 命令行工具。此为占位输出。"
-        ),
-        "stream": False,
-    }
-
-    with httpx.Client(timeout=60) as client:
-        resp = client.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("response", "").strip()
+    return (
+        f"[调试模式/{FALLBACK_MODEL}] 收到音频文件，大小 {file_size} 字节。"
+        "当前环境未成功调用 GLM-ASR-2512，请检查 ZHIPU_API_KEY 或网络连通性。"
+    )
 
 
 def smart_transcribe(audio_path: str) -> tuple[str, str]:
     try:
-        log.info("尝试 Ollama Whisper 转写...")
-        text = transcribe_with_ollama_whisper(audio_path)
+        log.info("尝试 GLM-ASR-2512 转写...")
+        text = transcribe_with_zhipu_asr(audio_path)
         if text:
-            return text, "ollama-whisper"
+            return text, "glm-asr-2512"
     except Exception as e:
-        log.warning(f"Ollama Whisper 失败: {e}")
+        log.warning(f"GLM-ASR-2512 失败: {e}")
 
     try:
         log.info("尝试 whisper.cpp CLI 转写...")
@@ -153,22 +154,12 @@ def smart_transcribe(audio_path: str) -> tuple[str, str]:
 
 
 def get_health_payload() -> dict:
-    ollama_ok = False
-    ollama_models = []
-    try:
-        with httpx.Client(timeout=5) as client:
-            r = client.get(f"{OLLAMA_BASE_URL}/api/tags")
-            if r.status_code == 200:
-                ollama_ok = True
-                ollama_models = [m["name"] for m in r.json().get("models", [])]
-    except Exception:
-        pass
-
     return {
         "status": "ok",
         "service": "ASR Bridge",
-        "ollama_connected": ollama_ok,
-        "ollama_models": ollama_models,
+        "asr_provider": "zhipu",
+        "asr_model": ZHIPU_ASR_MODEL,
+        "zhipu_configured": bool(ZHIPU_API_KEY),
         "output_dir": str(OUTPUT_DIR),
         "output_dir_exists": OUTPUT_DIR.exists(),
     }
@@ -342,7 +333,8 @@ class ASRHandler(BaseHTTPRequestHandler):
 
 def main():
     log.info("ASR Bridge Service 启动中...")
-    log.info(f"Ollama 地址: {OLLAMA_BASE_URL}")
+    log.info(f"ASR 提供方: zhipu ({ZHIPU_ASR_MODEL})")
+    log.info(f"ZHIPU_BASE_URL: {ZHIPU_BASE_URL}")
     log.info(f"输出目录: {OUTPUT_DIR}")
     log.info(f"监听: http://{LISTEN_HOST}:{LISTEN_PORT}")
 

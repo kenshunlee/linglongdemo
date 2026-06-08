@@ -18,8 +18,9 @@
 ASR_HOST=0.0.0.0
 PORT=8765
 ASR_OUTPUT_DIR=/tmp/output
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-WHISPER_MODEL=whisper
+ZHIPU_API_KEY=your_zhipu_api_key
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+ZHIPU_ASR_MODEL=glm-asr-2512
 FALLBACK_MODEL=phi3
 ```
 
@@ -55,4 +56,8 @@ serverBase: 'https://api.example.com/asr'
 curl.exe -i https://api.example.com/asr/health
 ```
 
-如果返回 200 且 JSON 中 status=ok，则网关联通。
+如果返回 200 且 JSON 中包含以下字段，则网关联通且 ASR 配置有效：
+
+- asr_provider=zhipu
+- asr_model=glm-asr-2512
+- zhipu_configured=true

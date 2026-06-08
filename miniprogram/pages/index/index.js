@@ -9,7 +9,9 @@ Page({
   data: {
     serverBase: '',
     serverConnected: false,
-    ollamaModels: [],
+    asrProvider: '',
+    asrModel: '',
+    zhipuConfigured: false,
 
     // 录音状态
     isRecording: false,
@@ -45,7 +47,9 @@ Page({
   onShow() {
     this.setData({
       serverConnected: app.globalData.serverConnected,
-      ollamaModels: app.globalData.ollamaModels,
+      asrProvider: app.globalData.asrProvider,
+      asrModel: app.globalData.asrModel,
+      zhipuConfigured: app.globalData.zhipuConfigured,
     });
     this.checkConnection();
   },
@@ -60,14 +64,23 @@ Page({
         if (res.statusCode === 200) {
           this.setData({
             serverConnected: true,
-            ollamaModels: res.data.ollama_models || [],
+            asrProvider: res.data.asr_provider || '',
+            asrModel: res.data.asr_model || '',
+            zhipuConfigured: !!res.data.zhipu_configured,
           });
           app.globalData.serverConnected = true;
-          app.globalData.ollamaModels = res.data.ollama_models || [];
+          app.globalData.asrProvider = res.data.asr_provider || '';
+          app.globalData.asrModel = res.data.asr_model || '';
+          app.globalData.zhipuConfigured = !!res.data.zhipu_configured;
         }
       },
       fail: () => {
-        this.setData({ serverConnected: false });
+        this.setData({
+          serverConnected: false,
+          asrProvider: '',
+          asrModel: '',
+          zhipuConfigured: false,
+        });
       }
     });
   },
@@ -234,7 +247,7 @@ Page({
           if (data.success) {
             // 计算徽章颜色
             let badge = 'info';
-            if (data.engine === 'ollama-whisper') badge = 'success';
+            if (data.engine === 'glm-asr-2512') badge = 'success';
             else if (data.engine === 'whisper-cpp') badge = 'success';
             else if (data.engine === 'phi3-fallback') badge = 'warning';
             else if (data.engine === 'none') badge = 'error';

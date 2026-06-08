@@ -7,7 +7,9 @@ App({
 
     // 连接状态
     serverConnected: false,
-    ollamaModels: [],
+    asrProvider: '',
+    asrModel: '',
+    zhipuConfigured: false,
   },
 
   onLaunch() {
@@ -32,12 +34,17 @@ App({
       success: (res) => {
         if (res.statusCode === 200) {
           this.globalData.serverConnected = true;
-          this.globalData.ollamaModels = res.data.ollama_models || [];
+          this.globalData.asrProvider = res.data.asr_provider || '';
+          this.globalData.asrModel = res.data.asr_model || '';
+          this.globalData.zhipuConfigured = !!res.data.zhipu_configured;
           console.log('[App] 服务连接正常', res.data);
         }
       },
       fail: (err) => {
         this.globalData.serverConnected = false;
+        this.globalData.asrProvider = '';
+        this.globalData.asrModel = '';
+        this.globalData.zhipuConfigured = false;
         console.warn('[App] 服务连接失败', err);
       }
     });

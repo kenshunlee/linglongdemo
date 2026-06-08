@@ -3,22 +3,23 @@
 ## 项目结构
 
 ```
-F:\Robots\team66\asr\
-├── backend\                # Python 后端桥接服务
-│   ├── server.py           # Python HTTP 主服务（兼容实现）
+F:/Robots/team66/asr/
+├── backend/                # Python 后端桥接服务
+│   ├── server.py           # Python HTTP 主服务（stdlib 实现）
 │   ├── requirements.txt    # Python 依赖
-│   └── start.bat           # Windows 一键启动脚本
-├── miniprogram\            # 微信小程序源码
+│   ├── start.bat           # Windows 一键启动脚本
+│   ├── cloud.env           # 云托管环境变量（本地私有）
+│   └── cloud.env.example   # 云托管环境变量模板
+├── miniprogram/            # 微信小程序源码
 │   ├── app.js              # 全局配置
 │   ├── app.json            # 页面路由
 │   ├── app.wxss            # 全局样式
 │   ├── project.config.json # 开发工具配置
-│   ├── pages\
-│   │   ├── index\          # 录音转写主页
-│   │   └── history\        # 历史记录页
+│   ├── pages/
+│   │   ├── index/          # 录音转写主页
+│   │   └── history/        # 历史记录页
 │   └── sitemap.json
-└── output\                 # 转写结果存储目录（自动创建）
-    └── asr20260608112030.txt  # 示例输出文件
+└── output/                 # 转写结果存储目录（自动创建）
 ```
 
 ## 整体架构
@@ -30,132 +31,120 @@ F:\Robots\team66\asr\
     ▼
 本地 Python HTTP 服务（端口 8765）
     │
-    ├─► Ollama Whisper API → 返回转写文本
+    ├─► 智谱 GLM-ASR-2512（主引擎）
     ├─► whisper.cpp CLI（备选）
     └─► phi3 占位模式（降级）
     │
     ▼
-F:\Robots\team66\asr\output\asr{时间戳}.txt
+output/asr{时间戳}.txt
 ```
 
-说明：当前版本后端已实现为 Python 标准库 HTTP 服务，接口保持不变（`/health`、`/transcribe`、`/records`）。
+后端接口保持不变：`/health`、`/transcribe`、`/records`。
 
 ## 快速开始
 
-### 第一步：安装 Ollama 和 Whisper 模型
-
-```bash
-# 1. 下载 Ollama：https://ollama.ai/download
-# 2. 尝试拉取 whisper 模型（部分版本仓库可能不可用）
-ollama pull whisper
-# 3. 可选：拉取 phi3 备用模型
-ollama pull phi3
-```
-
-如果 `ollama pull whisper` 返回 `file does not exist`，说明当前模型仓库无该标签。此时系统仍可运行并使用 `phi3-fallback` 路径返回占位结果。
-
-### 第二步：启动后端服务
-
-```bash
-# 方式 A：双击运行
-backend\start.bat
-
-# 方式 B：命令行
-cd backend
-pip install -r requirements.txt
-python server.py
-```
-
-建议（PowerShell + 虚拟环境）：
+### 第一步：安装依赖
 
 ```powershell
 f:/Robots/team66/asr/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
+```
+
+### 第二步：配置智谱 ASR
+
+在 `backend/cloud.env` 或系统环境变量中配置：
+
+```env
+ZHIPU_API_KEY=your_zhipu_api_key
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+ZHIPU_ASR_MODEL=glm-asr-2512
+```
+
+### 第三步：启动后端服务
+
+```powershell
 f:/Robots/team66/asr/.venv/Scripts/python.exe backend/server.py
 ```
 
-服务启动后访问：http://localhost:8765/health 检查状态
+或直接双击：`backend/start.bat`
 
-### 第三步：配置小程序
+服务启动后访问：`http://127.0.0.1:8765/health`
 
-1. 打开微信开发者工具
-2. 导入 `miniprogram\` 目录
-3. 在 `app.js` 中修改服务器 IP：
-   ```js
-   serverBase: 'http://192.168.x.x:8765',  // 改为你的电脑 IP
-   ```
-4. 在小程序管理后台添加 request 合法域名（真机调试时需要）
-5. 扫码预览或真机调试
+### 第四步：配置小程序
 
-### 第四步：获取本机 IP
+1. 打开微信开发者工具。
+2. 导入 `miniprogram/` 目录。
+3. 在 `miniprogram/app.js` 设置后端地址：
 
-```bash
-# Windows
-ipconfig | findstr IPv4
+```js
+serverBase: 'http://你的电脑局域网IP:8765'
 ```
 
-PowerShell 中建议使用以下方式检查后端健康状态：
+4. 真机调试时，确保手机和电脑在同一 WiFi。
+5. 发布前请配置合法 HTTPS 域名。
+
+## 健康检查示例
 
 ```powershell
 Invoke-RestMethod -Uri http://127.0.0.1:8765/health | ConvertTo-Json -Depth 6
 ```
 
+期望关键字段：
+
+- `asr_provider`: `zhipu`
+- `asr_model`: `glm-asr-2512`
+- `zhipu_configured`: `true`
+
 ## 转写引擎优先级
 
 | 优先级 | 引擎 | 说明 |
 |-------|------|------|
-| 1 | Ollama Whisper | `ollama pull whisper` 后自动使用 |
-| 2 | whisper.cpp CLI | 安装 whisper-cli 后自动使用 |
-| 3 | phi3 占位 | 无 Whisper 时的降级提示 |
+| 1 | GLM-ASR-2512 | 已配置 `ZHIPU_API_KEY` 时使用 |
+| 2 | whisper.cpp CLI | 本地安装 whisper-cli 时自动尝试 |
+| 3 | phi3 占位 | 上述不可用时返回降级提示 |
 
 ## 输出文件格式
 
-文件名格式：`asr{年月日时分秒}.txt`，例如：`asr20260608112030.txt`
+文件名格式：`asr{年月日时分秒}.txt`
 
-文件内容：
+文件内容示例：
+
 ```
 转写时间：2026-06-08 11:20:30
-转写引擎：ollama-whisper
+转写引擎：glm-asr-2512
 原始文件：record_1234567890.aac
 ────────────────────────────────────────
 （转写的文字内容）
 ```
 
-## API 接口文档
+## API 接口
 
 | 接口 | 方法 | 说明 |
 |------|------|------|
-| /health | GET | 健康检查，返回 Ollama 连接状态 |
-| /transcribe | POST | 上传音频文件，返回转写结果 |
-| /records | GET | 获取历史转写记录列表 |
+| `/health` | GET | 健康检查，返回引擎状态 |
+| `/transcribe` | POST | 上传音频文件，返回转写结果 |
+| `/records` | GET | 获取历史转写记录列表 |
 
 ## 常见问题
 
 **Q: 小程序无法连接后端？**
-- 手机和电脑需在同一 WiFi
-- 关闭电脑防火墙或开放 8765 端口
-- 使用局域网 IP，不要用 localhost
 
-**Q: Whisper 模型转写准确率低？**
-- 录音环境尽量安静
-- 录音时靠近手机麦克风
-- 可尝试更大的 whisper 模型：`ollama pull whisper:large`
+- 手机和电脑需在同一 WiFi。
+- 检查小程序中 `serverBase` 是否使用电脑局域网 IP。
+- 检查 8765 端口是否可访问。
 
-**Q: 提示"phi3-fallback"？**
-- 说明 Whisper 未安装，运行 `ollama pull whisper`
-- phi3 是语言模型，**不能**处理音频，仅作状态提示
+**Q: 返回 `phi3-fallback` 或 `none`？**
+
+- 通常是 `ZHIPU_API_KEY` 未配置或网络不可达。
+- 先检查 `/health` 中 `zhipu_configured` 是否为 `true`。
+- 再检查服务器访问智谱 API 的网络权限。
 
 **Q: 启动后端时无输出直接退出？**
-- 本机若使用 Python 3.14 alpha，部分依赖可能不兼容
-- 当前仓库已采用兼容版 `backend/server.py`，不依赖 FastAPI 也可运行
-- 优先建议使用稳定版 Python 3.11/3.12 进行长期开发
 
-## 已验证记录（2026-06-08）
+- Python 3.14 alpha 可能出现部分包兼容性问题。
+- 当前仓库后端采用 stdlib HTTP 实现，兼容性较好。
+- 生产建议使用 Python 3.11/3.12。
 
-- 已执行并通过：`/health`、`/transcribe`、`/records`
-- 本机 IPv4：`172.18.1.79`
-- 运行日志：`output/execution-log-20260608.md`
-- 示例输出：`output/asr20260608070742.txt`
+## 安全提示
 
-**Q: 小程序审核时 request 域名被拒？**
-- 在微信公众平台 → 开发 → 开发设置 → 服务器域名，添加你的后端域名（需 HTTPS）
-- 开发调试阶段可在开发者工具勾选"不校验合法域名"
+- `backend/cloud.env` 含敏感密钥，不要提交到公开仓库。
+- 若密钥曾暴露，请立即在智谱控制台更换。
