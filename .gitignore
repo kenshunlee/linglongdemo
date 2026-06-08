@@ -1,0 +1,13 @@
+.venv/
+.workbuddy/
+.codebuddy/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+output/
+
+*.log
+.DS_Store
+Thumbs.db

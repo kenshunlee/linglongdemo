@@ -1,0 +1,39 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/history/history"
+  ],
+  "window": {
+    "backgroundTextStyle": "light",
+    "navigationBarBackgroundColor": "#1a73e8",
+    "navigationBarTitleText": "语音转文字 ASR",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f0f4f8"
+  },
+  "tabBar": {
+    "color": "#999",
+    "selectedColor": "#1a73e8",
+    "borderStyle": "white",
+    "backgroundColor": "#ffffff",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "录音转写",
+        "iconPath": "assets/icons/mic.png",
+        "selectedIconPath": "assets/icons/mic-active.png"
+      },
+      {
+        "pagePath": "pages/history/history",
+        "text": "历史记录",
+        "iconPath": "assets/icons/list.png",
+        "selectedIconPath": "assets/icons/list-active.png"
+      }
+    ]
+  },
+  "networkTimeout": {
+    "request": 30000,
+    "uploadFile": 120000
+  },
+  "sitemapLocation": "sitemap.json",
+  "usingComponents": {}
+}

@@ -1,0 +1,74 @@
+<!-- pages/history/history.wxml — 历史转写记录 -->
+<view class="container">
+
+  <!-- 顶部统计 -->
+  <view class="card stat-card">
+    <view class="stat-item">
+      <text class="stat-num">{{records.length}}</text>
+      <text class="stat-label">总记录数</text>
+    </view>
+    <view class="stat-divider"></view>
+    <view class="stat-item">
+      <text class="stat-num">{{todayCount}}</text>
+      <text class="stat-label">今日转写</text>
+    </view>
+    <view class="stat-divider"></view>
+    <view class="stat-item">
+      <view class="refresh-btn" bindtap="onRefresh">
+        <text class="refresh-icon {{isRefreshing ? 'spin' : ''}}">🔄</text>
+        <text class="refresh-label">刷新</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 加载中 -->
+  <view class="loading-wrap" wx:if="{{isLoading}}">
+    <view class="spinner-sm"></view>
+    <text class="loading-text">加载中...</text>
+  </view>
+
+  <!-- 空状态 -->
+  <view class="empty-wrap" wx:elif="{{records.length === 0}}">
+    <text class="empty-icon">🗒️</text>
+    <text class="empty-text">暂无转写记录</text>
+    <text class="empty-sub">去录音页录入语音吧</text>
+  </view>
+
+  <!-- 记录列表 -->
+  <scroll-view scroll-y class="list-scroll" wx:else>
+    <view class="record-item card"
+          wx:for="{{records}}"
+          wx:key="filename"
+          bindtap="onViewDetail"
+          data-index="{{index}}">
+      <view class="item-header">
+        <text class="item-filename">{{item.filename}}</text>
+        <text class="item-size">{{item.sizeText}}</text>
+      </view>
+      <view class="item-time">{{item.mtime}}</view>
+      <view class="item-preview" wx:if="{{item.preview}}">
+        <text class="preview-text">{{item.preview}}</text>
+      </view>
+      <view class="item-no-preview" wx:else>
+        <text class="no-preview-text">（无预览内容）</text>
+      </view>
+    </view>
+  </scroll-view>
+
+</view>
+
+<!-- 详情弹窗 -->
+<view class="modal-mask" wx:if="{{showDetail}}" bindtap="onCloseDetail">
+  <view class="detail-box" catchtap="">
+    <view class="detail-header">
+      <text class="detail-filename">{{currentRecord.filename}}</text>
+      <text class="detail-close" bindtap="onCloseDetail">✕</text>
+    </view>
+    <scroll-view scroll-y class="detail-scroll">
+      <text class="detail-text" selectable>{{currentRecord.preview}}</text>
+    </scroll-view>
+    <view class="detail-actions">
+      <button class="btn-copy" size="mini" bindtap="onCopyDetail">复制全文</button>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,248 @@
+/* pages/index/index.wxss */
+
+/* ── 状态卡片 ── */
+.status-card { padding: 24rpx 32rpx; }
+.status-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12rpx;
+}
+.status-label {
+  font-size: 26rpx;
+  color: #888;
+  width: 160rpx;
+}
+.status-dot {
+  width: 16rpx; height: 16rpx;
+  border-radius: 50%;
+  margin-right: 10rpx;
+}
+.dot-on  { background: #27ae60; box-shadow: 0 0 6rpx #27ae60; }
+.dot-off { background: #e74c3c; }
+.status-text { font-size: 26rpx; color: #333; }
+.status-text.small { font-size: 22rpx; color: #666; flex: 1; }
+.server-url {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12rpx;
+  padding: 12rpx 16rpx;
+  background: #f5f7fa;
+  border-radius: 8rpx;
+}
+.url-text  { font-size: 24rpx; color: #1a73e8; font-family: monospace; }
+.edit-hint { font-size: 22rpx; color: #aaa; }
+
+/* ── 录音卡片 ── */
+.record-card { text-align: center; }
+.record-title { font-size: 34rpx; font-weight: 600; margin-bottom: 8rpx; }
+.record-tip   { font-size: 26rpx; color: #999; margin-bottom: 32rpx; }
+
+/* 波形动画 */
+.wave-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  height: 80rpx;
+  margin-bottom: 16rpx;
+  gap: 6rpx;
+}
+.wave-bar {
+  width: 8rpx;
+  height: 20rpx;
+  background: #1a73e8;
+  border-radius: 4rpx;
+  animation: none;
+}
+.wave-animate {
+  animation: waveAnim 0.8s ease-in-out infinite alternate;
+}
+@keyframes waveAnim {
+  0%   { height: 10rpx; }
+  100% { height: 60rpx; }
+}
+
+.record-duration {
+  font-size: 48rpx;
+  color: #e74c3c;
+  font-weight: 600;
+  margin-bottom: 24rpx;
+}
+
+/* 录音按钮 */
+.mic-btn-wrap { margin: 20rpx 0 32rpx; }
+.mic-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 200rpx;
+  height: 200rpx;
+  background: linear-gradient(135deg, #1a73e8, #0d47a1);
+  border-radius: 50%;
+  box-shadow: 0 8rpx 24rpx rgba(26, 115, 232, 0.4);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+.mic-btn-active {
+  transform: scale(0.95);
+  background: linear-gradient(135deg, #e74c3c, #c0392b);
+  box-shadow: 0 4rpx 12rpx rgba(231, 76, 60, 0.5);
+}
+.mic-btn-disabled {
+  background: #ccc;
+  box-shadow: none;
+}
+.mic-icon { font-size: 64rpx; }
+.mic-label { font-size: 26rpx; color: #fff; margin-top: 8rpx; }
+
+/* 分隔线 */
+.divider {
+  display: flex;
+  align-items: center;
+  margin: 16rpx 0;
+}
+.divider-line { flex: 1; height: 1rpx; background: #eee; }
+.divider-text  { margin: 0 20rpx; color: #bbb; font-size: 26rpx; }
+
+/* 上传按钮 */
+.upload-btn {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20rpx;
+  border: 2rpx dashed #1a73e8;
+  border-radius: 12rpx;
+  color: #1a73e8;
+  font-size: 28rpx;
+}
+
+/* ── 处理中 ── */
+.processing-card { }
+.processing-inner {
+  display: flex;
+  align-items: center;
+  margin-bottom: 20rpx;
+}
+.spinner {
+  width: 48rpx; height: 48rpx;
+  border: 4rpx solid #eee;
+  border-top-color: #1a73e8;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 20rpx;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.processing-title { font-size: 30rpx; font-weight: 600; color: #333; }
+.processing-sub   { font-size: 24rpx; color: #999; margin-top: 6rpx; }
+.progress-bar {
+  height: 8rpx;
+  background: #eee;
+  border-radius: 4rpx;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #1a73e8, #34a853);
+  border-radius: 4rpx;
+  transition: width 0.3s ease;
+}
+.progress-text {
+  font-size: 24rpx;
+  color: #999;
+  text-align: right;
+  margin-top: 8rpx;
+  display: block;
+}
+
+/* ── 结果卡片 ── */
+.result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
+.result-title { font-size: 30rpx; font-weight: 600; }
+.result-filename {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16rpx;
+  padding: 12rpx 16rpx;
+  background: #f5f7fa;
+  border-radius: 8rpx;
+}
+.file-icon { margin-right: 10rpx; }
+.filename { font-size: 26rpx; color: #1a73e8; font-family: monospace; }
+.result-text-wrap {
+  max-height: 360rpx;
+  overflow-y: auto;
+  padding: 20rpx;
+  background: #fafafa;
+  border-radius: 8rpx;
+  border: 1rpx solid #eee;
+  margin-bottom: 20rpx;
+}
+.result-text { font-size: 28rpx; line-height: 1.7; color: #333; }
+.result-actions { display: flex; gap: 16rpx; justify-content: flex-end; }
+.btn-copy  { background: #1a73e8 !important; color: #fff !important; border-radius: 8rpx !important; }
+.btn-share { background: #34a853 !important; color: #fff !important; border-radius: 8rpx !important; }
+
+/* ── 错误卡片 ── */
+.error-card {
+  border-left: 6rpx solid #e74c3c;
+  background: #fff8f8;
+}
+.error-icon { font-size: 36rpx; margin-right: 12rpx; }
+.error-msg  { font-size: 28rpx; color: #e74c3c; line-height: 1.6; }
+.error-help { margin-top: 20rpx; padding-top: 16rpx; border-top: 1rpx solid #eee; }
+.help-title { font-size: 26rpx; font-weight: 600; color: #666; display: block; margin-bottom: 10rpx; }
+.help-item  { font-size: 24rpx; color: #888; display: block; margin-bottom: 8rpx; }
+
+/* ── 弹窗 ── */
+.modal-mask {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+.modal-box {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 40rpx;
+  width: 600rpx;
+}
+.modal-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 24rpx;
+  text-align: center;
+}
+.modal-input {
+  width: 100%;
+  border: 2rpx solid #ddd;
+  border-radius: 8rpx;
+  padding: 16rpx;
+  font-size: 26rpx;
+  margin-bottom: 32rpx;
+  box-sizing: border-box;
+}
+.modal-btns {
+  display: flex;
+  gap: 20rpx;
+}
+.modal-btn-cancel {
+  flex: 1;
+  background: #f5f5f5 !important;
+  color: #666 !important;
+  border-radius: 8rpx !important;
+}
+.modal-btn-ok {
+  flex: 1;
+  background: #1a73e8 !important;
+  color: #fff !important;
+  border-radius: 8rpx !important;
+}

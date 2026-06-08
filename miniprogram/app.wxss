@@ -1,0 +1,33 @@
+/* app.wxss — 全局样式 */
+page {
+  background-color: #f0f4f8;
+  font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  color: #333;
+  box-sizing: border-box;
+}
+
+.container {
+  padding: 20rpx;
+  min-height: 100vh;
+}
+
+/* 通用卡片 */
+.card {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 32rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.06);
+}
+
+/* 状态徽章 */
+.badge {
+  display: inline-block;
+  padding: 4rpx 16rpx;
+  border-radius: 20rpx;
+  font-size: 22rpx;
+}
+.badge-success { background: #e6f7ee; color: #27ae60; }
+.badge-warning { background: #fff3e0; color: #e67e22; }
+.badge-error   { background: #fdecea; color: #e74c3c; }
+.badge-info    { background: #e3f2fd; color: #1a73e8; }
