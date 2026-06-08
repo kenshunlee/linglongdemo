@@ -1,20 +1,20 @@
 // app.js — 全局配置与初始化
-const DEFAULT_SERVER_BASE = 'http://172.18.1.79:8765';
+const DEFAULT_SERVER_BASE = 'http://192.168.137.1:8765';
 
 App({
   globalData: {
-    // 默认地址仅用于本机调试，真机请改为电脑 LAN/USB 网段地址
+    // 默认地址优先用于安卓 USB 网络共享调试，真机请按实际网段调整
     serverBase: DEFAULT_SERVER_BASE,
     serverPresets: [
       {
-        key: 'lan',
-        label: '局域网 IP',
+        key: 'usb',
+        label: 'USB 共享网络 IP',
         url: DEFAULT_SERVER_BASE,
       },
       {
-        key: 'usb',
-        label: 'USB 共享网络 IP',
-        url: 'http://192.168.137.1:8765',
+        key: 'lan',
+        label: '局域网 IP',
+        url: 'http://172.18.1.79:8765',
       },
       {
         key: 'tunnel',

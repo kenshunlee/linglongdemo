@@ -21,8 +21,11 @@
       <text class="status-text small">{{activeEngine}}</text>
     </view>
     <view class="server-url" bindtap="onEditServer">
-      <text class="url-text">{{serverBase}}</text>
-      <text class="edit-hint">点击修改</text>
+      <view class="server-url-main">
+        <text class="server-url-label">USB 调试地址</text>
+        <text class="url-text">{{serverBase}}</text>
+      </view>
+      <text class="edit-hint">点此切换</text>
     </view>
   </view>
 
@@ -137,7 +140,7 @@
     <input class="modal-input" value="{{serverInput}}"
            bindinput="onServerInput"
            placeholder="http://192.168.x.x:8765" />
-    <text class="modal-tip">安卓 USB 网络共享时，填写电脑在 USB 网段里的 IP（不是 127.0.0.1）</text>
+    <text class="modal-tip">安卓 USB 网络共享时，优先填写电脑在 USB 网段里的 IP（不是 127.0.0.1）</text>
     <view class="modal-btns">
       <button class="modal-btn-cancel" bindtap="onCloseModal">取消</button>
       <button class="modal-btn-ok" bindtap="onSaveServer">保存</button>

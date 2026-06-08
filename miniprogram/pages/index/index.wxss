@@ -30,6 +30,16 @@
   background: #f5f7fa;
   border-radius: 8rpx;
 }
+.server-url-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  flex: 1;
+}
+.server-url-label {
+  font-size: 22rpx;
+  color: #6b7a90;
+}
 .url-text  { font-size: 24rpx; color: #1a73e8; font-family: monospace; }
 .edit-hint { font-size: 22rpx; color: #aaa; }
 

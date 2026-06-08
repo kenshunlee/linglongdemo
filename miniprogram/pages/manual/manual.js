@@ -128,12 +128,20 @@ Page({
     this.runAction('右转', () => this.req('/robot/turn', 'POST', { angle_deg: a }));
   },
 
-  onGripperOpen() {
-    this.runAction('张开夹爪', () => this.req('/robot/gripper', 'POST', { action: 'open', side: 'both' }));
+  onLeftGripperOpen() {
+    this.runAction('左手张开', () => this.req('/robot/gripper', 'POST', { action: 'open', side: 'left' }));
   },
 
-  onGripperClose() {
-    this.runAction('闭合夹爪', () => this.req('/robot/gripper', 'POST', { action: 'close', side: 'both' }));
+  onLeftGripperClose() {
+    this.runAction('左手闭合', () => this.req('/robot/gripper', 'POST', { action: 'close', side: 'left' }));
+  },
+
+  onRightGripperOpen() {
+    this.runAction('右手张开', () => this.req('/robot/gripper', 'POST', { action: 'open', side: 'right' }));
+  },
+
+  onRightGripperClose() {
+    this.runAction('右手闭合', () => this.req('/robot/gripper', 'POST', { action: 'close', side: 'right' }));
   },
 
   onLeftExtend() {

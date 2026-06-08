@@ -24,6 +24,64 @@
   border-radius: 12rpx !important;
   background: #e9eef6 !important;
   color: #243247 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+}
+
+.btn-icon {
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 110, 168, 0.12);
+  color: #0f6ea8;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.btn-label {
+  font-size: 28rpx;
+  line-height: 1.2;
+}
+
+.hand-split {
+  display: flex;
+  gap: 16rpx;
+  align-items: stretch;
+}
+
+.side-card {
+  flex: 1;
+  padding: 18rpx;
+  border-radius: 16rpx;
+  border: 1rpx solid #dbe7f5;
+  background: linear-gradient(180deg, #f8fbff 0%, #f2f7fd 100%);
+  box-sizing: border-box;
+}
+
+.side-title {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #243247;
+  text-align: center;
+  margin-bottom: 12rpx;
+}
+
+.side-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.side-actions .btn {
+  width: 100%;
+  margin-top: 0;
 }
 
 .btn-main {

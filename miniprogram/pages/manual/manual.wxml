@@ -5,12 +5,12 @@
       <text class="badge {{robotReady ? 'badge-success' : 'badge-error'}}">{{robotReady ? 'SDK可用' : 'SDK不可用'}}</text>
     </view>
     <text class="hint">{{sdkReason}}</text>
-    <button class="btn btn-ghost" bindtap="refreshHealth" loading="{{busy}}">刷新状态</button>
+    <button class="btn btn-ghost" bindtap="refreshHealth" loading="{{busy}}"><text class="btn-icon">↺</text><text class="btn-label">刷新状态</text></button>
   </view>
 
   <view class="card">
     <text class="title">1. 初始化</text>
-    <button class="btn btn-main" bindtap="onInitRobot" loading="{{busy}}">上电初始化</button>
+    <button class="btn btn-main" bindtap="onInitRobot" loading="{{busy}}"><text class="btn-icon">◆</text><text class="btn-label">上电初始化</text></button>
   </view>
 
   <view class="card">
@@ -20,8 +20,8 @@
       <input type="digit" value="{{moveDistance}}" bindinput="onMoveInput" />
     </view>
     <view class="btn-grid">
-      <button class="btn" bindtap="onForward" loading="{{busy}}">前进</button>
-      <button class="btn" bindtap="onBackward" loading="{{busy}}">后退</button>
+      <button class="btn" bindtap="onForward" loading="{{busy}}"><text class="btn-icon">▲</text><text class="btn-label">前进</text></button>
+      <button class="btn" bindtap="onBackward" loading="{{busy}}"><text class="btn-icon">▼</text><text class="btn-label">后退</text></button>
     </view>
 
     <view class="input-row">
@@ -29,26 +29,33 @@
       <input type="digit" value="{{turnAngle}}" bindinput="onTurnInput" />
     </view>
     <view class="btn-grid">
-      <button class="btn" bindtap="onTurnLeft" loading="{{busy}}">左转</button>
-      <button class="btn" bindtap="onTurnRight" loading="{{busy}}">右转</button>
+      <button class="btn" bindtap="onTurnLeft" loading="{{busy}}"><text class="btn-icon">◀</text><text class="btn-label">左转</text></button>
+      <button class="btn" bindtap="onTurnRight" loading="{{busy}}"><text class="btn-icon">▶</text><text class="btn-label">右转</text></button>
     </view>
   </view>
 
   <view class="card">
-    <text class="title">4/5. 夹爪</text>
-    <view class="btn-grid">
-      <button class="btn" bindtap="onGripperOpen" loading="{{busy}}">张开夹爪</button>
-      <button class="btn" bindtap="onGripperClose" loading="{{busy}}">闭合夹爪</button>
-    </view>
-  </view>
+    <text class="title">4/5/6/7. 左右手动作</text>
+    <view class="hand-split">
+      <view class="side-card side-left">
+        <text class="side-title">左手</text>
+        <view class="side-actions">
+          <button class="btn" bindtap="onLeftExtend" loading="{{busy}}"><text class="btn-icon">↖</text><text class="btn-label">左手前伸</text></button>
+          <button class="btn" bindtap="onLeftRetract" loading="{{busy}}"><text class="btn-icon">↙</text><text class="btn-label">左手收回</text></button>
+          <button class="btn" bindtap="onLeftGripperOpen" loading="{{busy}}"><text class="btn-icon">⊕</text><text class="btn-label">左手张开</text></button>
+          <button class="btn" bindtap="onLeftGripperClose" loading="{{busy}}"><text class="btn-icon">⊖</text><text class="btn-label">左手闭合</text></button>
+        </view>
+      </view>
 
-  <view class="card">
-    <text class="title">6/7/8/9. 双手预置动作</text>
-    <view class="btn-grid">
-      <button class="btn" bindtap="onLeftExtend" loading="{{busy}}">左手前伸</button>
-      <button class="btn" bindtap="onLeftRetract" loading="{{busy}}">左手收回</button>
-      <button class="btn" bindtap="onRightExtend" loading="{{busy}}">右手前伸</button>
-      <button class="btn" bindtap="onRightRetract" loading="{{busy}}">右手收回</button>
+      <view class="side-card side-right">
+        <text class="side-title">右手</text>
+        <view class="side-actions">
+          <button class="btn" bindtap="onRightExtend" loading="{{busy}}"><text class="btn-icon">↗</text><text class="btn-label">右手前伸</text></button>
+          <button class="btn" bindtap="onRightRetract" loading="{{busy}}"><text class="btn-icon">↘</text><text class="btn-label">右手收回</text></button>
+          <button class="btn" bindtap="onRightGripperOpen" loading="{{busy}}"><text class="btn-icon">⊕</text><text class="btn-label">右手张开</text></button>
+          <button class="btn" bindtap="onRightGripperClose" loading="{{busy}}"><text class="btn-icon">⊖</text><text class="btn-label">右手闭合</text></button>
+        </view>
+      </view>
     </view>
   </view>
 
@@ -59,7 +66,7 @@
       <view class="chip {{camera==='left' ? 'chip-on' : ''}}" data-camera="left" bindtap="onSelectCamera">左手相机</view>
       <view class="chip {{camera==='right' ? 'chip-on' : ''}}" data-camera="right" bindtap="onSelectCamera">右手相机</view>
     </view>
-    <button class="btn btn-ghost" bindtap="onTogglePreview">{{cameraPreviewOn ? '停止预览' : '开始预览'}}</button>
+    <button class="btn btn-ghost" bindtap="onTogglePreview"><text class="btn-icon">{{cameraPreviewOn ? '■' : '▷'}}</text><text class="btn-label">{{cameraPreviewOn ? '停止预览' : '开始预览'}}</text></button>
     <image wx:if="{{cameraSrc}}" mode="widthFix" src="{{cameraSrc}}" binderror="onCameraError" />
     <text class="hint" wx:if="{{cameraError}}">{{cameraError}}</text>
   </view>
@@ -70,8 +77,8 @@
       <view class="picker">{{taskList.length ? taskList[taskIndex] : '暂无任务，请检查 config 目录'}}</view>
     </picker>
     <view class="btn-grid">
-      <button class="btn btn-ghost" bindtap="loadTasks">刷新任务列表</button>
-      <button class="btn btn-main" bindtap="onPlayTask" loading="{{busy}}">按文件回放轨迹</button>
+      <button class="btn btn-ghost" bindtap="loadTasks"><text class="btn-icon">↺</text><text class="btn-label">刷新任务列表</text></button>
+      <button class="btn btn-main" bindtap="onPlayTask" loading="{{busy}}"><text class="btn-icon">▶</text><text class="btn-label">按文件回放轨迹</text></button>
     </view>
   </view>
 

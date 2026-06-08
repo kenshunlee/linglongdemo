@@ -30,6 +30,41 @@ try:
 except Exception:
     WhisperModel = None
 
+
+def load_env_file(env_path: Path) -> None:
+    if not env_path.exists():
+        return
+
+    try:
+        with env_path.open("r", encoding="utf-8-sig") as fp:
+            for raw_line in fp:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+
+                if line.lower().startswith("export "):
+                    line = line[7:].strip()
+
+                if "=" not in line:
+                    continue
+
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if not key or key in os.environ:
+                    continue
+
+                value = value.strip()
+                if (value.startswith('"') and value.endswith('"')) or (
+                    value.startswith("'") and value.endswith("'")
+                ):
+                    value = value[1:-1]
+
+                os.environ[key] = value
+    except Exception as exc:
+        print(f"[WARN] 读取环境文件失败 {env_path}: {exc}")
+
+
+load_env_file(Path(__file__).with_name("cloud.env"))
 # ------------------- 配置区 -------------------
 ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
 ZHIPU_BASE_URL = os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
@@ -45,6 +80,9 @@ DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output"
 OUTPUT_DIR = Path(os.getenv("ASR_OUTPUT_DIR", str(DEFAULT_OUTPUT_DIR)))
 LISTEN_HOST = os.getenv("ASR_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.getenv("PORT", os.getenv("ASR_PORT", "8765")))
+USB_DEBUG_PREFERRED = os.getenv("USB_DEBUG_PREFERRED", "1") == "1"
+if USB_DEBUG_PREFERRED and LISTEN_HOST in {"127.0.0.1", "localhost", "::1"}:
+    LISTEN_HOST = "0.0.0.0"
 # ---------------------------------------------
 
 logging.basicConfig(
@@ -304,6 +342,21 @@ def get_ipv4_addresses() -> list[str]:
     return ips
 
 
+def _sort_usb_addresses(addresses: list[str]) -> list[str]:
+    def score(ip: str) -> tuple[int, str]:
+        if ip.startswith("192.168.137."):
+            return (0, ip)
+        if ip.startswith("192.168."):
+            return (1, ip)
+        if ip.startswith("172."):
+            return (2, ip)
+        if ip.startswith("10."):
+            return (3, ip)
+        return (4, ip)
+
+    return sorted(addresses, key=score)
+
+
 def list_records_payload(limit: int) -> dict:
     files = sorted(OUTPUT_DIR.glob("asr*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
     records = []
@@ -517,8 +570,11 @@ def main():
         log.info(f"本地 ASR 状态: {LOCAL_ASR_STATE.get('error')}")
     log.info(f"输出目录: {OUTPUT_DIR}")
     log.info(f"监听: http://{LISTEN_HOST}:{LISTEN_PORT}")
-    for ip in get_ipv4_addresses():
+    ips = _sort_usb_addresses(get_ipv4_addresses())
+    for ip in ips:
         log.info(f"可用于手机调试的地址: http://{ip}:{LISTEN_PORT}")
+    if ips:
+        log.info(f"USB 调试优先地址: http://{ips[0]}:{LISTEN_PORT}")
 
     server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), ASRHandler)
     try:
