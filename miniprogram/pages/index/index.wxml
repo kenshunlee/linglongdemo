@@ -12,6 +12,14 @@
       <text class="status-label">ASR 引擎</text>
       <text class="status-text small">{{asrProvider || 'unknown'}} / {{asrModel || 'unknown'}} {{zhipuConfigured ? '(已配置)' : '(未配置API Key)'}}</text>
     </view>
+    <view class="status-row" wx:if="{{serverConnected}}">
+      <text class="status-label">运行设备</text>
+      <text class="status-text small">{{device || 'unknown'}} / {{gpuAvailable ? 'GPU可用' : 'GPU不可用'}}</text>
+    </view>
+    <view class="status-row" wx:if="{{serverConnected && activeEngine}}">
+      <text class="status-label">当前引擎</text>
+      <text class="status-text small">{{activeEngine}}</text>
+    </view>
     <view class="server-url" bindtap="onEditServer">
       <text class="url-text">{{serverBase}}</text>
       <text class="edit-hint">点击修改</text>
@@ -49,13 +57,16 @@
     </view>
 
     <!-- 或上传音频文件 -->
-    <view class="divider">
+    <view class="divider" wx:if="{{enableFileUpload}}">
       <view class="divider-line"></view>
       <text class="divider-text">或</text>
       <view class="divider-line"></view>
     </view>
-    <view class="upload-btn" bindtap="onChooseFile">
+    <view class="upload-btn" bindtap="onChooseFile" wx:if="{{enableFileUpload}}">
       <text>📂 选择音频文件</text>
+    </view>
+    <view class="upload-hidden-tip" wx:else>
+      <text>当前仅保留“按住录音”入口，文件上传已临时隐藏</text>
     </view>
   </view>
 
@@ -114,9 +125,13 @@
 <view class="modal-mask" wx:if="{{showServerModal}}" bindtap="onCloseModal">
   <view class="modal-box" catchtap="">
     <text class="modal-title">修改服务器地址</text>
+    <picker range="{{serverPresets}}" range-key="label" value="{{presetIndex}}" bindchange="onPresetChange">
+      <view class="preset-select">快捷预设：{{serverPresets[presetIndex].label || '无'}}</view>
+    </picker>
     <input class="modal-input" value="{{serverInput}}"
            bindinput="onServerInput"
            placeholder="http://192.168.x.x:8765" />
+    <text class="modal-tip">安卓 USB 网络共享时，填写电脑在 USB 网段里的 IP（不是 127.0.0.1）</text>
     <view class="modal-btns">
       <button class="modal-btn-cancel" bindtap="onCloseModal">取消</button>
       <button class="modal-btn-ok" bindtap="onSaveServer">保存</button>

@@ -9,9 +9,11 @@ import json
 import logging
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
+from typing import Any
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -20,11 +22,24 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 from multipart import parse_form
 
+# from zai import ZhipuAiClient
+
+try:
+    from faster_whisper import WhisperModel  # type: ignore[import-not-found]
+except Exception:
+    WhisperModel = None
+
 # ------------------- 配置区 -------------------
 ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
 ZHIPU_BASE_URL = os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
 ZHIPU_ASR_MODEL = os.getenv("ZHIPU_ASR_MODEL", "glm-asr-2512")
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "phi3")
+PHI3_FIRST = os.getenv("PHI3_FIRST", "0") == "1"
+LOCAL_ASR_ENABLED = os.getenv("LOCAL_ASR_ENABLED", "1") == "1"
+LOCAL_ASR_MODEL_SIZE = os.getenv("LOCAL_ASR_MODEL_SIZE", "small")
+LOCAL_ASR_DEVICE = os.getenv("LOCAL_ASR_DEVICE", "auto")
+LOCAL_ASR_LANGUAGE = os.getenv("LOCAL_ASR_LANGUAGE", "zh")
+LOCAL_ASR_DOWNLOAD_DIR = os.getenv("LOCAL_ASR_DOWNLOAD_DIR", str(Path(__file__).resolve().parents[1] / "models"))
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output"
 OUTPUT_DIR = Path(os.getenv("ASR_OUTPUT_DIR", str(DEFAULT_OUTPUT_DIR)))
 LISTEN_HOST = os.getenv("ASR_HOST", "0.0.0.0")
@@ -40,30 +55,104 @@ log = logging.getLogger(__name__)
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+LOCAL_ASR_STATE: dict[str, object] = {
+    "enabled": LOCAL_ASR_ENABLED,
+    "ready": False,
+    "provider": "faster-whisper",
+    "model": LOCAL_ASR_MODEL_SIZE,
+    "device": "unknown",
+    "error": "",
+}
+LOCAL_ASR_MODEL = None
+
 
 def generate_filename() -> str:
     return "asr" + datetime.now().strftime("%Y%m%d%H%M%S")
+
+
+def init_local_asr() -> None:
+    global LOCAL_ASR_MODEL
+
+    if not LOCAL_ASR_ENABLED:
+        LOCAL_ASR_STATE["error"] = "LOCAL_ASR_ENABLED=0"
+        return
+
+    if WhisperModel is None:
+        LOCAL_ASR_STATE["error"] = "未安装 faster-whisper"
+        return
+
+    download_dir = Path(LOCAL_ASR_DOWNLOAD_DIR)
+    download_dir.mkdir(parents=True, exist_ok=True)
+
+    def _load_model(device: str, compute_type: str) -> Any:
+        return WhisperModel(
+            LOCAL_ASR_MODEL_SIZE,
+            device=device,
+            compute_type=compute_type,
+            download_root=str(download_dir),
+        )
+
+    preferred_device = LOCAL_ASR_DEVICE
+    if preferred_device == "auto":
+        preferred_device = "cuda"
+
+    try:
+        LOCAL_ASR_MODEL = _load_model(preferred_device, "float16" if preferred_device == "cuda" else "int8")
+        LOCAL_ASR_STATE.update({"ready": True, "device": preferred_device, "error": ""})
+        log.info(f"本地 ASR 已就绪: faster-whisper/{LOCAL_ASR_MODEL_SIZE} on {preferred_device}")
+        return
+    except Exception as e:
+        LOCAL_ASR_STATE["error"] = f"{preferred_device} 初始化失败: {e}"
+        log.warning(f"本地 ASR 初始化失败({preferred_device}): {e}")
+
+    if preferred_device != "cpu":
+        try:
+            LOCAL_ASR_MODEL = _load_model("cpu", "int8")
+            LOCAL_ASR_STATE.update({"ready": True, "device": "cpu", "error": ""})
+            log.info(f"本地 ASR 已降级为 CPU: faster-whisper/{LOCAL_ASR_MODEL_SIZE}")
+            return
+        except Exception as e:
+            LOCAL_ASR_STATE["error"] = f"cpu 初始化失败: {e}"
+            log.warning(f"本地 ASR CPU 初始化失败: {e}")
+
+
+def transcribe_with_local_asr(audio_path: str) -> str:
+    if not LOCAL_ASR_STATE.get("ready") or LOCAL_ASR_MODEL is None:
+        raise RuntimeError(f"本地 ASR 不可用: {LOCAL_ASR_STATE.get('error', 'unknown')}")
+
+    segments, _ = LOCAL_ASR_MODEL.transcribe(
+        audio_path,
+        beam_size=5,
+        vad_filter=True,
+        language=LOCAL_ASR_LANGUAGE,
+    )
+    text = "".join(segment.text for segment in segments).strip()
+    if not text:
+        raise RuntimeError("本地 ASR 未返回文本")
+    return text
 
 
 def transcribe_with_zhipu_asr(audio_path: str) -> str:
     if not ZHIPU_API_KEY:
         raise ValueError("未配置 ZHIPU_API_KEY")
 
-    endpoint = f"{ZHIPU_BASE_URL.rstrip('/')}/audio/transcriptions"
+    url = f"{ZHIPU_BASE_URL.rstrip('/')}/audio/transcriptions"
+    payload = {
+        "model": ZHIPU_ASR_MODEL,
+        "stream": "false",
+    }
     headers = {"Authorization": f"Bearer {ZHIPU_API_KEY}"}
 
-    with open(audio_path, "rb") as f:
-        files = {
-            "file": (Path(audio_path).name, f, "application/octet-stream")
-        }
-        data = {
-            "model": ZHIPU_ASR_MODEL,
-        }
+    print(f"请求 GLM-ASR 转写: {audio_path} → {url}，模型: {ZHIPU_ASR_MODEL}")
 
+    with open(audio_path, "rb") as fp:
+        files = {
+            "file": (Path(audio_path).name, fp, "application/octet-stream")
+        }
         with httpx.Client(timeout=120) as client:
-            resp = client.post(endpoint, headers=headers, data=data, files=files)
-        resp.raise_for_status()
-        data = resp.json()
+            response = client.post(url, data=payload, files=files, headers=headers)
+        response.raise_for_status()
+        data = response.json()
 
     text = (
         data.get("text")
@@ -73,6 +162,10 @@ def transcribe_with_zhipu_asr(audio_path: str) -> str:
     )
     if not text:
         raise ValueError(f"GLM-ASR 响应中未找到转写文本: {data}")
+    
+    print(f"GLM-ASR 原始响应: {data}")
+    print(f"GLM-ASR 提取文本: {text}")
+
     return str(text).strip()
 
 
@@ -128,6 +221,24 @@ def transcribe_with_phi3_mock(audio_path: str) -> str:
 
 
 def smart_transcribe(audio_path: str) -> tuple[str, str]:
+    if PHI3_FIRST:
+        try:
+            log.info("按配置优先使用 phi3 转写...")
+            text = transcribe_with_phi3_mock(audio_path)
+            return text, "phi3-priority"
+        except Exception as e:
+            log.warning(f"phi3 优先路径失败: {e}")
+
+    if LOCAL_ASR_STATE.get("ready"):
+        try:
+            log.info("尝试本地 ASR(faster-whisper) 转写...")
+            text = transcribe_with_local_asr(audio_path)
+            if text:
+                engine = f"faster-whisper-{LOCAL_ASR_STATE.get('device', 'unknown')}"
+                return text, engine
+        except Exception as e:
+            log.warning(f"本地 ASR 失败: {e}")
+
     try:
         log.info("尝试 GLM-ASR-2512 转写...")
         text = transcribe_with_zhipu_asr(audio_path)
@@ -154,15 +265,50 @@ def smart_transcribe(audio_path: str) -> tuple[str, str]:
 
 
 def get_health_payload() -> dict:
+    if PHI3_FIRST:
+        preferred_provider = "phi3"
+        preferred_model = FALLBACK_MODEL
+    else:
+        preferred_provider = "faster-whisper" if LOCAL_ASR_STATE.get("ready") else ("zhipu" if ZHIPU_API_KEY else "fallback")
+        preferred_model = str(LOCAL_ASR_STATE.get("model")) if LOCAL_ASR_STATE.get("ready") else ZHIPU_ASR_MODEL
     return {
         "status": "ok",
         "service": "ASR Bridge",
-        "asr_provider": "zhipu",
-        "asr_model": ZHIPU_ASR_MODEL,
+        "asr_provider": preferred_provider,
+        "asr_model": preferred_model,
+        "phi3_first": PHI3_FIRST,
         "zhipu_configured": bool(ZHIPU_API_KEY),
+        "local_asr_enabled": LOCAL_ASR_ENABLED,
+        "local_asr_ready": bool(LOCAL_ASR_STATE.get("ready")),
+        "local_asr_provider": LOCAL_ASR_STATE.get("provider"),
+        "local_asr_model": LOCAL_ASR_STATE.get("model"),
+        "device": LOCAL_ASR_STATE.get("device"),
+        "gpu_available": LOCAL_ASR_STATE.get("device") == "cuda" and bool(LOCAL_ASR_STATE.get("ready")),
+        "active_engine": (
+            "phi3-priority"
+            if PHI3_FIRST
+            else
+            f"faster-whisper-{LOCAL_ASR_STATE.get('device', 'unknown')}"
+            if LOCAL_ASR_STATE.get("ready")
+            else "remote-fallback"
+        ),
+        "local_asr_error": LOCAL_ASR_STATE.get("error"),
         "output_dir": str(OUTPUT_DIR),
         "output_dir_exists": OUTPUT_DIR.exists(),
     }
+
+
+def get_ipv4_addresses() -> list[str]:
+    ips = []
+    try:
+        hostnames = [socket.gethostname(), socket.getfqdn()]
+        for host in hostnames:
+            for ip in socket.gethostbyname_ex(host)[2]:
+                if ip and not ip.startswith("127.") and ip not in ips:
+                    ips.append(ip)
+    except Exception:
+        return ips
+    return ips
 
 
 def list_records_payload(limit: int) -> dict:
@@ -332,11 +478,23 @@ class ASRHandler(BaseHTTPRequestHandler):
 
 
 def main():
+    init_local_asr()
+
     log.info("ASR Bridge Service 启动中...")
-    log.info(f"ASR 提供方: zhipu ({ZHIPU_ASR_MODEL})")
+    if LOCAL_ASR_STATE.get("ready"):
+        log.info(
+            "ASR 提供方: faster-whisper "
+            f"({LOCAL_ASR_STATE.get('model')}, device={LOCAL_ASR_STATE.get('device')})"
+        )
+    else:
+        log.info(f"ASR 提供方: zhipu ({ZHIPU_ASR_MODEL})")
     log.info(f"ZHIPU_BASE_URL: {ZHIPU_BASE_URL}")
+    if LOCAL_ASR_STATE.get("error"):
+        log.info(f"本地 ASR 状态: {LOCAL_ASR_STATE.get('error')}")
     log.info(f"输出目录: {OUTPUT_DIR}")
     log.info(f"监听: http://{LISTEN_HOST}:{LISTEN_PORT}")
+    for ip in get_ipv4_addresses():
+        log.info(f"可用于手机调试的地址: http://{ip}:{LISTEN_PORT}")
 
     server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), ASRHandler)
     try:

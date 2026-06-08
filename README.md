@@ -1,150 +1,120 @@
-# 微信小程序 ASR 语音转文字系统
+# 微信小程序 ASR 本机 Demo（LAN/USB 可达）
 
-## 项目结构
+本项目用于临时 Demo：后端运行在本机，优先使用本地 GPU 算力；安卓真机小程序通过 LAN 或 USB 网络共享访问本机服务。
 
-```
-F:/Robots/team66/asr/
-├── backend/                # Python 后端桥接服务
-│   ├── server.py           # Python HTTP 主服务（stdlib 实现）
-│   ├── requirements.txt    # Python 依赖
-│   ├── start.bat           # Windows 一键启动脚本
-│   ├── cloud.env           # 云托管环境变量（本地私有）
-│   └── cloud.env.example   # 云托管环境变量模板
-├── miniprogram/            # 微信小程序源码
-│   ├── app.js              # 全局配置
-│   ├── app.json            # 页面路由
-│   ├── app.wxss            # 全局样式
-│   ├── project.config.json # 开发工具配置
-│   ├── pages/
-│   │   ├── index/          # 录音转写主页
-│   │   └── history/        # 历史记录页
-│   └── sitemap.json
-└── output/                 # 转写结果存储目录（自动创建）
-```
-
-## 整体架构
+## 架构
 
 ```
-手机微信小程序
+安卓微信小程序
     │
-    │  wx.uploadFile（音频文件）
+    │ wx.uploadFile(audio)
     ▼
-本地 Python HTTP 服务（端口 8765）
+本机 Python ASR 服务（0.0.0.0:8765）
     │
-    ├─► 智谱 GLM-ASR-2512（主引擎）
-    ├─► whisper.cpp CLI（备选）
-    └─► phi3 占位模式（降级）
+    ├─► faster-whisper（本地优先，GPU 优先，失败降级 CPU）
+    ├─► GLM-ASR-2512（配置 API Key 时兜底）
+    ├─► whisper.cpp CLI（可选兜底）
+    └─► phi3-fallback（最终降级提示）
     │
     ▼
 output/asr{时间戳}.txt
 ```
 
-后端接口保持不变：`/health`、`/transcribe`、`/records`。
+后端接口保持不变：/health、/transcribe、/records。
 
 ## 快速开始
 
-### 第一步：安装依赖
+### 1) 安装依赖
 
 ```powershell
 f:/Robots/team66/asr/.venv/Scripts/python.exe -m pip install -r backend/requirements.txt
 ```
 
-### 第二步：配置智谱 ASR
+### 2) 启动后端
 
-在 `backend/cloud.env` 或系统环境变量中配置：
+方式 A：双击 [backend/start.bat](backend/start.bat)
 
-```env
-ZHIPU_API_KEY=your_zhipu_api_key
-ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4
-ZHIPU_ASR_MODEL=glm-asr-2512
-```
-
-### 第三步：启动后端服务
+方式 B：命令行
 
 ```powershell
 f:/Robots/team66/asr/.venv/Scripts/python.exe backend/server.py
 ```
 
-或直接双击：`backend/start.bat`
+建议可选环境变量：
 
-服务启动后访问：`http://127.0.0.1:8765/health`
-
-### 第四步：配置小程序
-
-1. 打开微信开发者工具。
-2. 导入 `miniprogram/` 目录。
-3. 在 `miniprogram/app.js` 设置后端地址：
-
-```js
-serverBase: 'http://你的电脑局域网IP:8765'
+```env
+LOCAL_ASR_ENABLED=1
+LOCAL_ASR_MODEL_SIZE=small
+LOCAL_ASR_DEVICE=auto
+LOCAL_ASR_LANGUAGE=zh
+ASR_HOST=0.0.0.0
+ASR_PORT=8765
 ```
 
-4. 真机调试时，确保手机和电脑在同一 WiFi。
-5. 发布前请配置合法 HTTPS 域名。
-
-## 健康检查示例
+### 3) 检查服务状态
 
 ```powershell
 Invoke-RestMethod -Uri http://127.0.0.1:8765/health | ConvertTo-Json -Depth 6
 ```
 
-期望关键字段：
+重点字段：
 
-- `asr_provider`: `zhipu`
-- `asr_model`: `glm-asr-2512`
-- `zhipu_configured`: `true`
+- asr_provider
+- asr_model
+- active_engine
+- device
+- gpu_available
+- local_asr_ready
+
+## 小程序联调
+
+### 方案 A：同 Wi-Fi（推荐）
+
+1. 手机与电脑连接同一局域网。
+2. 小程序首页点击服务器地址，填写 http://电脑LAN-IP:8765。
+3. 点击保存后应显示“已连接”。
+
+### 方案 B：USB 网络共享（无公网/无同网时）
+
+1. 安卓手机连接 USB，开启 USB 网络共享。
+2. 查询电脑在 USB 网段的 IPv4（通常类似 192.168.137.x）。
+3. 小程序服务器地址填写 http://该IPv4:8765。
+4. 注意不能使用 127.0.0.1。
+
+### 小程序页面内置地址预设
+
+在首页“修改服务器地址”弹窗可直接选择：
+
+- 局域网 IP
+- USB 共享网络 IP
+- 临时隧道地址
+
+保存后会写入本地缓存，后续调试自动复用。
 
 ## 转写引擎优先级
 
 | 优先级 | 引擎 | 说明 |
 |-------|------|------|
-| 1 | GLM-ASR-2512 | 已配置 `ZHIPU_API_KEY` 时使用 |
-| 2 | whisper.cpp CLI | 本地安装 whisper-cli 时自动尝试 |
-| 3 | phi3 占位 | 上述不可用时返回降级提示 |
-
-## 输出文件格式
-
-文件名格式：`asr{年月日时分秒}.txt`
-
-文件内容示例：
-
-```
-转写时间：2026-06-08 11:20:30
-转写引擎：glm-asr-2512
-原始文件：record_1234567890.aac
-────────────────────────────────────────
-（转写的文字内容）
-```
-
-## API 接口
-
-| 接口 | 方法 | 说明 |
-|------|------|------|
-| `/health` | GET | 健康检查，返回引擎状态 |
-| `/transcribe` | POST | 上传音频文件，返回转写结果 |
-| `/records` | GET | 获取历史转写记录列表 |
+| 1 | faster-whisper | 本地优先；device=auto 时优先尝试 CUDA，失败降 CPU |
+| 2 | GLM-ASR-2512 | 配置 ZHIPU_API_KEY 后可兜底 |
+| 3 | whisper.cpp CLI | 本地安装 whisper-cli 时自动尝试 |
+| 4 | phi3-fallback | 仅返回调试提示 |
 
 ## 常见问题
 
-**Q: 小程序无法连接后端？**
+Q: 手机显示未连接？
 
-- 手机和电脑需在同一 WiFi。
-- 检查小程序中 `serverBase` 是否使用电脑局域网 IP。
-- 检查 8765 端口是否可访问。
+- 确认后端监听 0.0.0.0:8765。
+- 检查 Windows 防火墙是否放行 8765 入站。
+- 检查小程序地址是否为电脑可达 IPv4（非 localhost/127.0.0.1）。
+- 微信开发者工具调试时关闭域名校验。
 
-**Q: 返回 `phi3-fallback` 或 `none`？**
+Q: health 返回 gpu_available=false？
 
-- 通常是 `ZHIPU_API_KEY` 未配置或网络不可达。
-- 先检查 `/health` 中 `zhipu_configured` 是否为 `true`。
-- 再检查服务器访问智谱 API 的网络权限。
+- 本地 GPU 初始化失败后会自动降级 CPU。
+- 可先用 CPU 路径演示，或调整 LOCAL_ASR_MODEL_SIZE 进一步降低负载。
 
-**Q: 启动后端时无输出直接退出？**
+Q: 仍然走远程引擎？
 
-- Python 3.14 alpha 可能出现部分包兼容性问题。
-- 当前仓库后端采用 stdlib HTTP 实现，兼容性较好。
-- 生产建议使用 Python 3.11/3.12。
-
-## 安全提示
-
-- `backend/cloud.env` 含敏感密钥，不要提交到公开仓库。
-- 若密钥曾暴露，请立即在智谱控制台更换。
+- 检查 local_asr_ready 字段是否为 true。
+- 若 false，查看 local_asr_error 字段定位依赖/驱动问题。

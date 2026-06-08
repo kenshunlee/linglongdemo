@@ -115,6 +115,11 @@
   color: #1a73e8;
   font-size: 28rpx;
 }
+.upload-hidden-tip {
+  font-size: 24rpx;
+  color: #96a0ad;
+  margin-top: 8rpx;
+}
 
 /* ── 处理中 ── */
 .processing-card { }
@@ -206,13 +211,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 999;
+  z-index: 9999;
 }
 .modal-box {
+  position: relative;
+  z-index: 10000;
   background: #fff;
   border-radius: 16rpx;
   padding: 40rpx;
   width: 600rpx;
+  box-shadow: 0 16rpx 48rpx rgba(0, 0, 0, 0.2);
 }
 .modal-title {
   font-size: 32rpx;
@@ -220,6 +228,17 @@
   display: block;
   margin-bottom: 24rpx;
   text-align: center;
+}
+.preset-select {
+  width: 100%;
+  border: 2rpx solid #cfe1ff;
+  background: #f5f9ff;
+  border-radius: 8rpx;
+  padding: 16rpx;
+  font-size: 25rpx;
+  color: #1a73e8;
+  box-sizing: border-box;
+  margin-bottom: 18rpx;
 }
 .modal-input {
   width: 100%;
@@ -229,6 +248,13 @@
   font-size: 26rpx;
   margin-bottom: 32rpx;
   box-sizing: border-box;
+}
+.modal-tip {
+  display: block;
+  font-size: 22rpx;
+  color: #888;
+  margin-top: -16rpx;
+  margin-bottom: 20rpx;
 }
 .modal-btns {
   display: flex;

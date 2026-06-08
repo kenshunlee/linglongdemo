@@ -8,10 +8,15 @@ const MAX_RECORD_SECONDS = 60;
 Page({
   data: {
     serverBase: '',
+    serverPresets: [],
+    presetIndex: 0,
     serverConnected: false,
     asrProvider: '',
     asrModel: '',
     zhipuConfigured: false,
+    activeEngine: '',
+    device: '',
+    gpuAvailable: false,
 
     // 录音状态
     isRecording: false,
@@ -34,13 +39,22 @@ Page({
     // 服务器地址弹窗
     showServerModal: false,
     serverInput: '',
+
+    // 临时隐藏文件上传入口，避免遮挡地址修改弹窗
+    enableFileUpload: false,
   },
 
   // ─────── 生命周期 ───────
   onLoad() {
+    const presets = app.globalData.serverPresets || [];
     const stored = wx.getStorageSync('serverBase');
     const base = stored || app.globalData.serverBase;
-    this.setData({ serverBase: base, serverInput: base });
+    this.setData({
+      serverBase: base,
+      serverInput: base,
+      serverPresets: presets,
+      presetIndex: this._findPresetIndexByUrl(base, presets),
+    });
     app.globalData.serverBase = base;
   },
 
@@ -50,6 +64,9 @@ Page({
       asrProvider: app.globalData.asrProvider,
       asrModel: app.globalData.asrModel,
       zhipuConfigured: app.globalData.zhipuConfigured,
+      activeEngine: app.globalData.activeEngine || '',
+      device: app.globalData.device || '',
+      gpuAvailable: !!app.globalData.gpuAvailable,
     });
     this.checkConnection();
   },
@@ -67,11 +84,17 @@ Page({
             asrProvider: res.data.asr_provider || '',
             asrModel: res.data.asr_model || '',
             zhipuConfigured: !!res.data.zhipu_configured,
+            activeEngine: res.data.active_engine || '',
+            device: res.data.device || '',
+            gpuAvailable: !!res.data.gpu_available,
           });
           app.globalData.serverConnected = true;
           app.globalData.asrProvider = res.data.asr_provider || '';
           app.globalData.asrModel = res.data.asr_model || '';
           app.globalData.zhipuConfigured = !!res.data.zhipu_configured;
+          app.globalData.activeEngine = res.data.active_engine || '';
+          app.globalData.device = res.data.device || '';
+          app.globalData.gpuAvailable = !!res.data.gpu_available;
         }
       },
       fail: () => {
@@ -80,6 +103,9 @@ Page({
           asrProvider: '',
           asrModel: '',
           zhipuConfigured: false,
+          activeEngine: '',
+          device: '',
+          gpuAvailable: false,
         });
       }
     });
@@ -95,6 +121,14 @@ Page({
   onServerInput(e) {
     this.setData({ serverInput: e.detail.value });
   },
+  onPresetChange(e) {
+    const idx = Number(e.detail.value || 0);
+    const presets = this.data.serverPresets || [];
+    const selected = presets[idx];
+    if (!selected || !selected.url) return;
+    const url = selected.url.replace(/\/$/, '');
+    this.setData({ presetIndex: idx, serverInput: url });
+  },
   onSaveServer() {
     let url = this.data.serverInput.trim();
     if (!url.startsWith('http')) {
@@ -102,9 +136,13 @@ Page({
       return;
     }
     url = url.replace(/\/$/, ''); // 去掉末尾斜杠
-    this.setData({ serverBase: url, serverInput: url, showServerModal: false });
-    app.globalData.serverBase = url;
-    wx.setStorageSync('serverBase', url);
+    this._persistServerBase(url);
+    this.setData({
+      serverBase: url,
+      serverInput: url,
+      showServerModal: false,
+      presetIndex: this._findPresetIndexByUrl(url, this.data.serverPresets),
+    });
     this.checkConnection();
   },
 
@@ -203,6 +241,10 @@ Page({
 
   // ─────── 选择文件 ───────
   onChooseFile() {
+    if (!this.data.enableFileUpload) {
+      wx.showToast({ title: '文件上传功能暂时隐藏', icon: 'none' });
+      return;
+    }
     wx.chooseMessageFile({
       count: 1,
       type: 'file',
@@ -316,6 +358,21 @@ Page({
   // ─────── 错误处理 ───────
   _showError(msg, showHelp) {
     this.setData({ errorMsg: msg, showHelp: !!showHelp });
+  },
+
+  _persistServerBase(url) {
+    app.globalData.serverBase = url;
+    wx.setStorageSync('serverBase', url);
+  },
+
+  _findPresetIndexByUrl(url, presets) {
+    const list = presets || [];
+    for (let i = 0; i < list.length; i += 1) {
+      if ((list[i].url || '').replace(/\/$/, '') === (url || '').replace(/\/$/, '')) {
+        return i;
+      }
+    }
+    return 0;
   },
 
   onUnload() {
