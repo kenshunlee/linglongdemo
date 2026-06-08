@@ -70,6 +70,12 @@
     </view>
   </view>
 
+  <view class="card">
+    <view class="record-title">机器人手动操控</view>
+    <view class="record-tip">进入控制页执行初始化、移动、夹爪、手臂、相机和轨迹回放</view>
+    <button class="manual-nav-btn" bindtap="onGoManualControl">进入手动操控</button>
+  </view>
+
   <!-- 处理中状态 -->
   <view class="card processing-card" wx:if="{{isProcessing}}">
     <view class="processing-inner">

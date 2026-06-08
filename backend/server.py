@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 from multipart import parse_form
+from robot_control import maybe_handle_robot_request
 
 # from zai import ZhipuAiClient
 
@@ -355,6 +356,14 @@ class ASRHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_bytes(self, code: int, payload: bytes, content_type: str):
+        self.send_response(code)
+        self._set_cors()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_OPTIONS(self):
         self.send_response(204)
         self._set_cors()
@@ -362,6 +371,15 @@ class ASRHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
+        robot_resp = maybe_handle_robot_request("GET", self.path)
+        if robot_resp is not None:
+            code, payload, content_type = robot_resp
+            if isinstance(payload, (bytes, bytearray)):
+                self._send_bytes(code, bytes(payload), content_type)
+            else:
+                self._send_json(code, payload)
+            return
+
         if parsed.path == "/health":
             self._send_json(200, get_health_payload())
             return
@@ -379,6 +397,20 @@ class ASRHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/robot/"):
+            try:
+                clen = int(self.headers.get("Content-Length", "0") or "0")
+            except ValueError:
+                clen = 0
+            body = self.rfile.read(clen) if clen > 0 else b""
+            robot_resp = maybe_handle_robot_request("POST", self.path, body)
+            if robot_resp is None:
+                self._send_json(404, {"detail": "Not Found"})
+                return
+            code, payload, _ = robot_resp
+            self._send_json(code, payload)
+            return
+
         if parsed.path != "/transcribe":
             self._send_json(404, {"detail": "Not Found"})
             return

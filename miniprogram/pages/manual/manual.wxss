@@ -1,0 +1,93 @@
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #243247;
+  display: block;
+  margin-bottom: 12rpx;
+}
+
+.hint {
+  font-size: 24rpx;
+  color: #55657f;
+  line-height: 1.6;
+  display: block;
+}
+
+.btn {
+  margin-top: 12rpx;
+  border-radius: 12rpx !important;
+  background: #e9eef6 !important;
+  color: #243247 !important;
+}
+
+.btn-main {
+  background: #0f6ea8 !important;
+  color: #ffffff !important;
+}
+
+.btn-ghost {
+  background: #ffffff !important;
+  color: #0f6ea8 !important;
+  border: 2rpx solid #0f6ea8 !important;
+}
+
+.btn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12rpx;
+}
+
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  margin: 12rpx 0;
+}
+
+.input-row input {
+  flex: 1;
+  border: 1rpx solid #ced9ea;
+  border-radius: 8rpx;
+  padding: 12rpx 14rpx;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin: 10rpx 0;
+}
+
+.chip {
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: #edf1f7;
+  color: #425575;
+  font-size: 24rpx;
+}
+
+.chip-on {
+  background: #0f6ea8;
+  color: #fff;
+}
+
+.picker {
+  border: 1rpx solid #ced9ea;
+  border-radius: 10rpx;
+  padding: 16rpx;
+  color: #2c3b53;
+  margin-top: 8rpx;
+}
+
+image {
+  margin-top: 14rpx;
+  border-radius: 10rpx;
+  width: 100%;
+  background: #f3f6fb;
+}

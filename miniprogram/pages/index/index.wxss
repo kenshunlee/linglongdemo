@@ -121,6 +121,13 @@
   margin-top: 8rpx;
 }
 
+.manual-nav-btn {
+  margin-top: 14rpx;
+  background: #0f6ea8 !important;
+  color: #fff !important;
+  border-radius: 10rpx !important;
+}
+
 /* ── 处理中 ── */
 .processing-card { }
 .processing-inner {

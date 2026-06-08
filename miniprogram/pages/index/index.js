@@ -168,6 +168,12 @@ Page({
     }
   },
 
+  onGoManualControl() {
+    wx.navigateTo({
+      url: '/pages/manual/manual'
+    });
+  },
+
   _startRecording() {
     const recManager = wx.getRecorderManager();
     this.recManager = recManager;
