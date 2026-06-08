@@ -221,13 +221,13 @@ def transcribe_with_phi3_mock(audio_path: str) -> str:
 
 
 def smart_transcribe(audio_path: str) -> tuple[str, str]:
-    if PHI3_FIRST:
-        try:
-            log.info("按配置优先使用 phi3 转写...")
-            text = transcribe_with_phi3_mock(audio_path)
-            return text, "phi3-priority"
-        except Exception as e:
-            log.warning(f"phi3 优先路径失败: {e}")
+    try:
+        log.info("尝试 GLM-ASR-2512 转写...")
+        text = transcribe_with_zhipu_asr(audio_path)
+        if text:
+            return text, "glm-asr-2512"
+    except Exception as e:
+        log.warning(f"GLM-ASR-2512 失败: {e}")
 
     if LOCAL_ASR_STATE.get("ready"):
         try:
@@ -238,14 +238,6 @@ def smart_transcribe(audio_path: str) -> tuple[str, str]:
                 return text, engine
         except Exception as e:
             log.warning(f"本地 ASR 失败: {e}")
-
-    try:
-        log.info("尝试 GLM-ASR-2512 转写...")
-        text = transcribe_with_zhipu_asr(audio_path)
-        if text:
-            return text, "glm-asr-2512"
-    except Exception as e:
-        log.warning(f"GLM-ASR-2512 失败: {e}")
 
     try:
         log.info("尝试 whisper.cpp CLI 转写...")
