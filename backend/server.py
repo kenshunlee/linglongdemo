@@ -13,6 +13,8 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
+import uuid
 from typing import Any
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,7 +23,10 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 from multipart import parse_form
-from robot_control import maybe_handle_robot_request
+from robot_control import maybe_handle_robot_request, robot_service
+from reflow_client import ReflowClient, ReflowConfig
+from mission_controller import MissionController
+from mission_reflow_bridge import MissionReflowBridge
 
 # from zai import ZhipuAiClient
 
@@ -64,6 +69,12 @@ def load_env_file(env_path: Path) -> None:
         print(f"[WARN] 读取环境文件失败 {env_path}: {exc}")
 
 
+def _as_bool(v: str | None, default: bool = False) -> bool:
+    if v is None:
+        return default
+    return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 load_env_file(Path(__file__).with_name("cloud.env"))
 # ------------------- 配置区 -------------------
 ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
@@ -83,6 +94,26 @@ LISTEN_PORT = int(os.getenv("PORT", os.getenv("ASR_PORT", "8765")))
 USB_DEBUG_PREFERRED = os.getenv("USB_DEBUG_PREFERRED", "1") == "1"
 if USB_DEBUG_PREFERRED and LISTEN_HOST in {"127.0.0.1", "localhost", "::1"}:
     LISTEN_HOST = "0.0.0.0"
+
+# 赛星回流配置
+REFLOW_ENABLED = _as_bool(os.getenv("REFLOW_ENABLED", "1"), True)
+REFLOW_BASE_URL = os.getenv("REFLOW_BASE_URL", "https://fuxingdao.sh-aia.com")
+REFLOW_LOGIN_NAME = os.getenv("REFLOW_LOGIN_NAME", "")
+REFLOW_PASSWORD = os.getenv("REFLOW_PASSWORD", "")
+REFLOW_TIMEOUT_S = float(os.getenv("REFLOW_TIMEOUT_S", "20"))
+REFLOW_VERIFY_SSL = _as_bool(os.getenv("REFLOW_VERIFY_SSL", "1"), True)
+REFLOW_TEAM_ID = os.getenv("REFLOW_TEAM_ID", "team66")
+REFLOW_ROBOT_ID = os.getenv("REFLOW_ROBOT_ID", "R-team66-01")
+REFLOW_SCENE_ID = os.getenv("REFLOW_SCENE_ID", "market")
+REFLOW_TASK_PREFIX = os.getenv("REFLOW_TASK_PREFIX", "EVAL-D")
+REFLOW_BATCH_MAX = int(os.getenv("REFLOW_BATCH_MAX", "200"))
+REFLOW_VALIDATE_TEAM_BINDING = _as_bool(os.getenv("REFLOW_VALIDATE_TEAM_BINDING", "1"), True)
+
+# 任务编排配置
+MISSION_ENABLED = _as_bool(os.getenv("MISSION_ENABLED", "1"), True)
+MISSION_DRY_RUN = _as_bool(os.getenv("MISSION_DRY_RUN", "1"), True)
+MISSION_DEFAULT_SPEED_MPS = float(os.getenv("MISSION_DEFAULT_SPEED_MPS", "0.18"))
+MISSION_AUTO_REFLOW = _as_bool(os.getenv("MISSION_AUTO_REFLOW", "1"), True)
 # ---------------------------------------------
 
 logging.basicConfig(
@@ -93,6 +124,46 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+REFLOW_CLIENT = ReflowClient(
+    ReflowConfig(
+        enabled=REFLOW_ENABLED,
+        base_url=REFLOW_BASE_URL,
+        login_name=REFLOW_LOGIN_NAME,
+        password=REFLOW_PASSWORD,
+        timeout_s=REFLOW_TIMEOUT_S,
+        verify_ssl=REFLOW_VERIFY_SSL,
+    )
+)
+
+REFLOW_STATE: dict[str, Any] = {
+    "session_id": "",
+    "task_id": "",
+    "scene_id": REFLOW_SCENE_ID,
+    "robot_id": REFLOW_ROBOT_ID,
+    "team_id": REFLOW_TEAM_ID,
+}
+
+MISSION_REFLOW_BRIDGE = MissionReflowBridge(
+    client=REFLOW_CLIENT,
+    enabled=bool(REFLOW_ENABLED and MISSION_AUTO_REFLOW),
+    team_id=REFLOW_TEAM_ID,
+    robot_id=REFLOW_ROBOT_ID,
+    scene_id=REFLOW_SCENE_ID,
+    task_prefix=REFLOW_TASK_PREFIX,
+    shared_state=REFLOW_STATE,
+)
+
+
+def _on_mission_event(event: str, payload: dict[str, Any], snapshot: dict[str, Any]) -> None:
+    MISSION_REFLOW_BRIDGE.handle_event(event, payload, snapshot)
+
+
+MISSION_CONTROLLER = MissionController(
+    robot_service=robot_service,
+    dry_run=MISSION_DRY_RUN,
+    event_callback=_on_mission_event,
+)
 
 LOCAL_ASR_STATE: dict[str, object] = {
     "enabled": LOCAL_ASR_ENABLED,
@@ -326,6 +397,17 @@ def get_health_payload() -> dict:
         "local_asr_error": LOCAL_ASR_STATE.get("error"),
         "output_dir": str(OUTPUT_DIR),
         "output_dir_exists": OUTPUT_DIR.exists(),
+        "reflow": {
+            "state": REFLOW_STATE,
+            **REFLOW_CLIENT.health(),
+        },
+        "mission": {
+            "enabled": MISSION_ENABLED,
+            "dry_run": MISSION_DRY_RUN,
+            "auto_reflow": bool(REFLOW_ENABLED and MISSION_AUTO_REFLOW),
+            "default_speed_mps": MISSION_DEFAULT_SPEED_MPS,
+            "status": MISSION_CONTROLLER.status(),
+        },
     }
 
 
@@ -398,7 +480,7 @@ class ASRHandler(BaseHTTPRequestHandler):
     def _set_cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type,Authorization")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type,Authorization,Idempotency-Key")
 
     def _send_json(self, code: int, payload: dict):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -446,7 +528,384 @@ class ASRHandler(BaseHTTPRequestHandler):
             self._send_json(200, list_records_payload(limit))
             return
 
+        if parsed.path == "/reflow/health":
+            self._send_json(200, {"success": True, "data": REFLOW_CLIENT.health()})
+            return
+
+        if parsed.path == "/reflow/session/current":
+            self._send_json(200, {"success": True, "data": REFLOW_STATE})
+            return
+
+        if parsed.path == "/reflow/session/status":
+            qs = parse_qs(parsed.query)
+            session_id = (qs.get("session_id", [REFLOW_STATE.get("session_id", "")])[0] or "").strip()
+            if not session_id:
+                self._send_json(400, {"detail": "缺少 session_id"})
+                return
+            try:
+                data = REFLOW_CLIENT.session_status(session_id)
+                self._send_json(200, {"success": True, "data": data})
+            except Exception as e:
+                self._send_json(500, {"success": False, "detail": str(e)})
+            return
+
+        if parsed.path == "/mission/status":
+            self._send_json(200, {"success": True, "data": MISSION_CONTROLLER.status()})
+            return
+
+        if parsed.path == "/mission/history":
+            qs = parse_qs(parsed.query)
+            try:
+                limit = int(qs.get("limit", ["10"])[0])
+            except ValueError:
+                limit = 10
+            self._send_json(200, {"success": True, "data": MISSION_CONTROLLER.history(limit=limit)})
+            return
+
         self._send_json(404, {"detail": "Not Found"})
+
+    def _read_json_body(self) -> dict[str, Any]:
+        try:
+            clen = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError:
+            clen = 0
+
+        if clen <= 0:
+            return {}
+
+        raw = self.rfile.read(clen)
+        if not raw:
+            return {}
+
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except Exception as e:
+            raise ValueError(f"无效 JSON: {e}")
+
+        if not isinstance(data, dict):
+            raise ValueError("请求体必须是 JSON object")
+        return data
+
+    def _build_reflow_identity(self, payload: dict[str, Any]) -> dict[str, Any]:
+        session_id = str(payload.get("session_id") or REFLOW_STATE.get("session_id") or "").strip()
+        task_id = str(payload.get("task_id") or REFLOW_STATE.get("task_id") or "").strip()
+        scene_id = str(payload.get("scene_id") or REFLOW_STATE.get("scene_id") or REFLOW_SCENE_ID).strip()
+        robot_id = str(payload.get("robot_id") or REFLOW_STATE.get("robot_id") or REFLOW_ROBOT_ID).strip()
+        team_id = str(payload.get("team_id") or REFLOW_STATE.get("team_id") or REFLOW_TEAM_ID).strip()
+        return {
+            "session_id": session_id,
+            "task_id": task_id,
+            "scene_id": scene_id,
+            "robot_id": robot_id,
+            "team_id": team_id,
+        }
+
+    def _chunked(self, items: list[Any], size: int) -> list[list[Any]]:
+        if size <= 0:
+            return [items]
+        return [items[i : i + size] for i in range(0, len(items), size)]
+
+    def _extract_team_from_me(self, me_resp: dict[str, Any]) -> str:
+        # /auth/me 可能返回包装结构 {code, message, data} 或直接用户对象。
+        data = me_resp.get("data") if isinstance(me_resp, dict) and "data" in me_resp else me_resp
+        if not isinstance(data, dict):
+            return ""
+        return str(data.get("team_id") or "").strip()
+
+    def _validate_team_binding(self, expected_team_id: str) -> dict[str, Any]:
+        if not REFLOW_VALIDATE_TEAM_BINDING:
+            return {"checked": False, "reason": "REFLOW_VALIDATE_TEAM_BINDING=0"}
+
+        me_resp = REFLOW_CLIENT.me()
+        actual_team_id = self._extract_team_from_me(me_resp)
+        ok = bool(actual_team_id) and (actual_team_id == expected_team_id)
+        if not ok:
+            raise ValueError(f"team_id 绑定校验失败: expected={expected_team_id}, actual={actual_team_id or '<empty>'}")
+        return {"checked": True, "expected": expected_team_id, "actual": actual_team_id}
+
+    def _handle_reflow_post(self, path: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        if path == "/reflow/auth/login":
+            data = REFLOW_CLIENT.login(force=True)
+            return 200, {"success": True, "data": data}
+
+        if path == "/reflow/auth/me":
+            REFLOW_CLIENT.login()
+            data = REFLOW_CLIENT.me()
+            return 200, {"success": True, "data": data}
+
+        if path == "/reflow/bootstrap":
+            REFLOW_CLIENT.login(force=bool(body.get("force_login", False)))
+            expected_team_id = str(body.get("team_id") or REFLOW_STATE.get("team_id") or REFLOW_TEAM_ID).strip()
+            check = self._validate_team_binding(expected_team_id)
+
+            # 可选一步创建会话，减少联调步骤。
+            if not body.get("create_session", True):
+                return 200, {"success": True, "check": check, "state": REFLOW_STATE}
+
+            now_iso = datetime.now().astimezone().isoformat(timespec="seconds")
+            task_id = str(body.get("task_id") or REFLOW_STATE.get("task_id") or f"{REFLOW_TASK_PREFIX}-{datetime.now().strftime('%Y%m%d%H%M%S')}")
+            payload = {
+                "team_id": expected_team_id,
+                "robot_id": str(body.get("robot_id") or REFLOW_STATE.get("robot_id") or REFLOW_ROBOT_ID),
+                "scene_id": str(body.get("scene_id") or REFLOW_STATE.get("scene_id") or REFLOW_SCENE_ID),
+                "task_id": task_id,
+                "coord_sys": body.get("coord_sys", "SH2000"),
+                "pose_source": body.get("pose_source", "robot"),
+                "mode": body.get("mode", "auto"),
+                "body_type": body.get("body_type", "biped"),
+                "planned_start_at": body.get("planned_start_at", now_iso),
+                "space_version": body.get("space_version"),
+                "coord_note": body.get("coord_note"),
+                "idempotency_key": body.get("idempotency_key") or f"{expected_team_id}-session-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            }
+            resp = REFLOW_CLIENT.create_session(payload=payload, idempotency_key=payload.get("idempotency_key"))
+            session_data = resp.get("data") or {}
+            session_id = str(session_data.get("session_id") or "").strip()
+            if session_id:
+                REFLOW_STATE.update(
+                    {
+                        "session_id": session_id,
+                        "task_id": task_id,
+                        "scene_id": payload["scene_id"],
+                        "robot_id": payload["robot_id"],
+                        "team_id": expected_team_id,
+                    }
+                )
+            return 200, {"success": True, "check": check, "data": resp, "state": REFLOW_STATE}
+
+        if path == "/reflow/session/start":
+            now_iso = datetime.now().astimezone().isoformat(timespec="seconds")
+            identity = self._build_reflow_identity(body)
+            if REFLOW_VALIDATE_TEAM_BINDING:
+                self._validate_team_binding(identity["team_id"])
+            task_id = identity["task_id"] or f"{REFLOW_TASK_PREFIX}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            identity["task_id"] = task_id
+
+            payload = {
+                "team_id": identity["team_id"],
+                "robot_id": identity["robot_id"],
+                "scene_id": identity["scene_id"],
+                "task_id": task_id,
+                "coord_sys": body.get("coord_sys", "SH2000"),
+                "pose_source": body.get("pose_source", "robot"),
+                "mode": body.get("mode", "auto"),
+                "body_type": body.get("body_type", "biped"),
+                "planned_start_at": body.get("planned_start_at", now_iso),
+                "space_version": body.get("space_version"),
+                "coord_note": body.get("coord_note"),
+                "idempotency_key": body.get("idempotency_key") or f"{identity['team_id']}-session-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            }
+            resp = REFLOW_CLIENT.create_session(payload=payload, idempotency_key=payload.get("idempotency_key"))
+            session_data = resp.get("data") or {}
+            session_id = str(session_data.get("session_id") or "").strip()
+            if session_id:
+                REFLOW_STATE.update(
+                    {
+                        "session_id": session_id,
+                        "task_id": task_id,
+                        "scene_id": identity["scene_id"],
+                        "robot_id": identity["robot_id"],
+                        "team_id": identity["team_id"],
+                    }
+                )
+            return 200, {"success": True, "data": resp, "state": REFLOW_STATE}
+
+        if path == "/reflow/session/finish":
+            identity = self._build_reflow_identity(body)
+            if not identity["session_id"]:
+                raise ValueError("缺少 session_id")
+
+            payload = {
+                "status": body.get("status", "completed"),
+                "start_at": body.get("start_at"),
+                "end_at": body.get("end_at") or datetime.now().astimezone().isoformat(timespec="seconds"),
+                "coord_sys": body.get("coord_sys"),
+                "coord_note": body.get("coord_note"),
+                "pose_source": body.get("pose_source"),
+                "space_version": body.get("space_version"),
+            }
+            payload = {k: v for k, v in payload.items() if v is not None}
+            resp = REFLOW_CLIENT.update_session(identity["session_id"], payload=payload)
+            return 200, {"success": True, "data": resp}
+
+        if path == "/reflow/task/report":
+            identity = self._build_reflow_identity(body)
+            if not identity["session_id"]:
+                raise ValueError("缺少 session_id")
+
+            payload = {
+                "team_id": identity["team_id"],
+                "robot_id": identity["robot_id"],
+                "scene_id": identity["scene_id"],
+                "task_id": identity["task_id"] or f"{REFLOW_TASK_PREFIX}-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                "session_id": identity["session_id"],
+                "start_at": body.get("start_at") or datetime.now().astimezone().isoformat(timespec="seconds"),
+                "end_at": body.get("end_at"),
+                "task_status": body.get("task_status", "running"),
+                "avg_speed_mps": body.get("avg_speed_mps"),
+                "checkpoints": body.get("checkpoints"),
+                "completion_note": body.get("completion_note"),
+                "task_phase": body.get("task_phase"),
+                "voice_intent": body.get("voice_intent"),
+                "idempotency_key": body.get("idempotency_key") or f"{identity['session_id']}-task-{datetime.now().strftime('%H%M%S')}",
+            }
+            payload = {k: v for k, v in payload.items() if v is not None}
+            resp = REFLOW_CLIENT.report_task(payload=payload, idempotency_key=payload.get("idempotency_key"))
+            return 200, {"success": True, "data": resp}
+
+        if path == "/reflow/trajectory/batch":
+            identity = self._build_reflow_identity(body)
+            if not identity["session_id"]:
+                raise ValueError("缺少 session_id")
+            points = body.get("points")
+            if not isinstance(points, list) or not points:
+                raise ValueError("points 必须是非空数组")
+
+            chunks = self._chunked(points, REFLOW_BATCH_MAX)
+            results = []
+            for idx, chunk in enumerate(chunks, start=1):
+                payload = {
+                    "session_id": identity["session_id"],
+                    "team_id": identity["team_id"],
+                    "robot_id": identity["robot_id"],
+                    "scene_id": identity["scene_id"],
+                    "task_id": identity["task_id"],
+                    "coord_sys": body.get("coord_sys", "SH2000"),
+                    "pose_source": body.get("pose_source", "robot"),
+                    "coord_note": body.get("coord_note"),
+                    "points": chunk,
+                    "idempotency_key": body.get("idempotency_key") or f"{identity['session_id']}-traj-{idx:03d}-{uuid.uuid4().hex[:6]}",
+                }
+                payload = {k: v for k, v in payload.items() if v is not None}
+                resp = REFLOW_CLIENT.batch_trajectory(payload=payload, idempotency_key=payload.get("idempotency_key"))
+                results.append(resp)
+            return 200, {"success": True, "chunks": len(chunks), "total_points": len(points), "data": results}
+
+        if path == "/reflow/embodied/batch":
+            identity = self._build_reflow_identity(body)
+            if not identity["session_id"]:
+                raise ValueError("缺少 session_id")
+            samples = body.get("samples")
+            if not isinstance(samples, list) or not samples:
+                raise ValueError("samples 必须是非空数组")
+
+            chunks = self._chunked(samples, REFLOW_BATCH_MAX)
+            results = []
+            for idx, chunk in enumerate(chunks, start=1):
+                payload = {
+                    "session_id": identity["session_id"],
+                    "team_id": identity["team_id"],
+                    "robot_id": identity["robot_id"],
+                    "scene_id": identity["scene_id"],
+                    "task_id": identity["task_id"],
+                    "samples": chunk,
+                    "idempotency_key": body.get("idempotency_key") or f"{identity['session_id']}-embodied-{idx:03d}-{uuid.uuid4().hex[:6]}",
+                }
+                payload = {k: v for k, v in payload.items() if v is not None}
+                resp = REFLOW_CLIENT.batch_embodied(payload=payload, idempotency_key=payload.get("idempotency_key"))
+                results.append(resp)
+            return 200, {"success": True, "chunks": len(chunks), "total_samples": len(samples), "data": results}
+
+        if path == "/reflow/events/batch":
+            identity = self._build_reflow_identity(body)
+            if not identity["session_id"]:
+                raise ValueError("缺少 session_id")
+            events = body.get("events")
+            if not isinstance(events, list) or not events:
+                raise ValueError("events 必须是非空数组")
+
+            chunks = self._chunked(events, REFLOW_BATCH_MAX)
+            results = []
+            for idx, chunk in enumerate(chunks, start=1):
+                payload = {
+                    "session_id": identity["session_id"],
+                    "coord_sys": body.get("coord_sys", "SH2000"),
+                    "pose_source": body.get("pose_source", "robot"),
+                    "coord_note": body.get("coord_note"),
+                    "events": chunk,
+                    "idempotency_key": body.get("idempotency_key") or f"{identity['session_id']}-event-{idx:03d}-{uuid.uuid4().hex[:6]}",
+                }
+                payload = {k: v for k, v in payload.items() if v is not None}
+                resp = REFLOW_CLIENT.batch_events(payload=payload, idempotency_key=payload.get("idempotency_key"))
+                results.append(resp)
+            return 200, {"success": True, "chunks": len(chunks), "total_events": len(events), "data": results}
+
+        raise ValueError(f"未知 reflow 路径: {path}")
+
+    def _handle_mission_post(self, path: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        if not MISSION_ENABLED:
+            raise ValueError("MISSION_ENABLED=0，任务编排已禁用")
+
+        if path == "/mission/start":
+            command_text = str(body.get("command_text") or body.get("text") or "").strip()
+            if not command_text:
+                raise ValueError("缺少 command_text")
+            options = {
+                "default_speed_mps": body.get("default_speed_mps", MISSION_DEFAULT_SPEED_MPS),
+            }
+            data = MISSION_CONTROLLER.start(command_text=command_text, options=options)
+            return 200, {"success": True, "data": data}
+
+        if path == "/mission/start_and_wait":
+            command_text = str(body.get("command_text") or body.get("text") or "").strip()
+            if not command_text:
+                raise ValueError("缺少 command_text")
+
+            options = {
+                "default_speed_mps": body.get("default_speed_mps", MISSION_DEFAULT_SPEED_MPS),
+            }
+            start_data = MISSION_CONTROLLER.start(command_text=command_text, options=options)
+            mission_id = str(start_data.get("mission_id") or "").strip()
+
+            try:
+                wait_timeout_s = float(body.get("wait_timeout_s", 90))
+            except Exception:
+                raise ValueError("wait_timeout_s 必须是数字")
+
+            try:
+                wait_poll_ms = int(body.get("wait_poll_ms", 250))
+            except Exception:
+                raise ValueError("wait_poll_ms 必须是整数")
+
+            wait_timeout_s = max(0.0, wait_timeout_s)
+            wait_poll_ms = min(5000, max(50, wait_poll_ms))
+
+            deadline = time.monotonic() + wait_timeout_s
+            while time.monotonic() <= deadline:
+                status = MISSION_CONTROLLER.status()
+                if not bool(status.get("running", False)):
+                    latest = MISSION_CONTROLLER.history(limit=1)
+                    item = (latest.get("items") or [None])[-1]
+                    if isinstance(item, dict) and str(item.get("mission_id") or "") == mission_id:
+                        return 200, {
+                            "success": True,
+                            "completed": True,
+                            "timed_out": False,
+                            "data": item,
+                        }
+                    return 200, {
+                        "success": True,
+                        "completed": True,
+                        "timed_out": False,
+                        "data": status,
+                    }
+                time.sleep(wait_poll_ms / 1000.0)
+
+            return 200, {
+                "success": True,
+                "completed": False,
+                "timed_out": True,
+                "data": {
+                    "mission_id": mission_id,
+                    "status": MISSION_CONTROLLER.status(),
+                },
+            }
+
+        if path == "/mission/stop":
+            data = MISSION_CONTROLLER.stop()
+            return 200, {"success": True, "data": data}
+
+        raise ValueError(f"未知 mission 路径: {path}")
 
     def do_POST(self):
         parsed = urlparse(self.path)
@@ -462,6 +921,30 @@ class ASRHandler(BaseHTTPRequestHandler):
                 return
             code, payload, _ = robot_resp
             self._send_json(code, payload)
+            return
+
+        if parsed.path.startswith("/reflow/"):
+            try:
+                body = self._read_json_body()
+                code, payload = self._handle_reflow_post(parsed.path, body)
+                self._send_json(code, payload)
+            except ValueError as e:
+                self._send_json(400, {"success": False, "detail": str(e)})
+            except Exception as e:
+                log.error(f"reflow 请求异常: {e}", exc_info=True)
+                self._send_json(500, {"success": False, "detail": str(e)})
+            return
+
+        if parsed.path.startswith("/mission/"):
+            try:
+                body = self._read_json_body()
+                code, payload = self._handle_mission_post(parsed.path, body)
+                self._send_json(code, payload)
+            except ValueError as e:
+                self._send_json(400, {"success": False, "detail": str(e)})
+            except Exception as e:
+                log.error(f"mission 请求异常: {e}", exc_info=True)
+                self._send_json(500, {"success": False, "detail": str(e)})
             return
 
         if parsed.path != "/transcribe":
@@ -569,6 +1052,11 @@ def main():
     if LOCAL_ASR_STATE.get("error"):
         log.info(f"本地 ASR 状态: {LOCAL_ASR_STATE.get('error')}")
     log.info(f"输出目录: {OUTPUT_DIR}")
+    log.info(f"回流开关: {'enabled' if REFLOW_ENABLED else 'disabled'}")
+    if REFLOW_ENABLED:
+        log.info(f"回流地址: {REFLOW_BASE_URL}")
+        log.info(f"回流账号: {REFLOW_LOGIN_NAME or '<unset>'}")
+    log.info(f"任务编排: {'enabled' if MISSION_ENABLED else 'disabled'} (dry_run={MISSION_DRY_RUN})")
     log.info(f"监听: http://{LISTEN_HOST}:{LISTEN_PORT}")
     ips = _sort_usb_addresses(get_ipv4_addresses())
     for ip in ips:

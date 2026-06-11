@@ -22,6 +22,29 @@ output/asr{时间戳}.txt
 
 后端接口保持不变：/health、/transcribe、/records。
 
+已新增回流联调接口（用于赛星实训平台）：
+
+- GET /reflow/health
+- GET /reflow/session/current
+- GET /reflow/session/status?session_id=...
+- POST /reflow/auth/login
+- POST /reflow/auth/me
+- POST /reflow/bootstrap
+- POST /reflow/session/start
+- POST /reflow/session/finish
+- POST /reflow/task/report
+- POST /reflow/embodied/batch
+- POST /reflow/trajectory/batch
+- POST /reflow/events/batch
+
+已新增市集导购任务编排接口：
+
+- GET /mission/status
+- GET /mission/history?limit=10
+- POST /mission/start
+- POST /mission/start_and_wait
+- POST /mission/stop
+
 ## 快速开始
 
 ### 1) 安装依赖
@@ -49,7 +72,29 @@ LOCAL_ASR_DEVICE=auto
 LOCAL_ASR_LANGUAGE=zh
 ASR_HOST=0.0.0.0
 ASR_PORT=8765
+
+REFLOW_ENABLED=1
+REFLOW_BASE_URL=https://fuxingdao.sh-aia.com
+REFLOW_LOGIN_NAME=team66
+REFLOW_PASSWORD=你的平台密码
+REFLOW_TEAM_ID=team66
+REFLOW_ROBOT_ID=R-team66-01
+REFLOW_SCENE_ID=market
+REFLOW_BATCH_MAX=200
+REFLOW_VALIDATE_TEAM_BINDING=1
+
+MISSION_ENABLED=1
+MISSION_DRY_RUN=1
+MISSION_DEFAULT_SPEED_MPS=0.18
+MISSION_AUTO_REFLOW=1
 ```
+
+说明：
+
+- /reflow/bootstrap 会执行登录、team_id 绑定校验（auth/me）并可选直接创建 session。
+- /reflow/trajectory/batch、/reflow/embodied/batch、/reflow/events/batch 支持超长数组自动分包（每包最多 REFLOW_BATCH_MAX 条）。
+- /mission/start 接收 command_text，按市集导购流程驱动状态机；MISSION_DRY_RUN=1 时只记录动作不下发机器人控制。
+- 开启 MISSION_AUTO_REFLOW=1 后，mission 的状态和动作会自动触发会话创建、任务上报、轨迹/具身/事件上报与会话收口。
 
 ### 3) 检查服务状态
 
