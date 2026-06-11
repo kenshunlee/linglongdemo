@@ -28,6 +28,7 @@ if "%LOCAL_ASR_MODEL_SIZE%"=="" set "LOCAL_ASR_MODEL_SIZE=small"
 if "%LOCAL_ASR_DEVICE%"=="" set "LOCAL_ASR_DEVICE=auto"
 if "%ASR_HOST%"=="" set "ASR_HOST=0.0.0.0"
 if "%ASR_PORT%"=="" set "ASR_PORT=8765"
+if "%PORT%"=="" set "PORT=%ASR_PORT%"
 if "%USB_DEBUG_PREFERRED%"=="" set "USB_DEBUG_PREFERRED=1"
 
 echo [1/3] Installing core Python dependencies...
@@ -49,7 +50,7 @@ if "%LOCAL_ASR_ENABLED%"=="1" (
     echo [2/3] Local ASR disabled by LOCAL_ASR_ENABLED=%LOCAL_ASR_ENABLED%.
 )
 
-echo [3/3] Starting ASR Bridge on port %ASR_PORT% ...
+echo [3/3] Starting ASR Bridge on port %PORT% ...
 echo         local ASR: enabled=%LOCAL_ASR_ENABLED%, model=%LOCAL_ASR_MODEL_SIZE%, device=%LOCAL_ASR_DEVICE%
 echo         host=%ASR_HOST%  usb_debug_preferred=%USB_DEBUG_PREFERRED%
 echo         stop with Ctrl+C

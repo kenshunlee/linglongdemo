@@ -1,4 +1,5 @@
 const app = getApp();
+const config = require('../../config');
 
 Page({
   data: {
@@ -22,8 +23,8 @@ Page({
   },
 
   onLoad() {
-    const base = wx.getStorageSync('serverBase') || app.globalData.serverBase;
-    this.setData({ serverBase: (base || '').replace(/\/$/, '') });
+    const base = config.normalizeServerBase(wx.getStorageSync('serverBase') || app.globalData.serverBase);
+    this.setData({ serverBase: base });
     this.refreshHealth();
     this.loadTasks();
   },

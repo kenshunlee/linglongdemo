@@ -23,8 +23,8 @@ function buildRequestBase(serverBase) {
 App({
   globalData: {
     // 默认地址优先用于安卓 USB 网络共享调试，真机请按实际网段调整
-    serverBase: config.serverBase,
-    requestBase: buildRequestBase(config.serverBase),
+    serverBase: config.normalizeServerBase(config.serverBase),
+    requestBase: buildRequestBase(config.normalizeServerBase(config.serverBase)),
     serverPresets: config.serverPresets,
 
     // 连接状态
@@ -36,10 +36,10 @@ App({
 
   onLaunch() {
     console.log('[App] onLaunch');
-    const stored = wx.getStorageSync('serverBase') || '';
+    const stored = config.normalizeServerBase(wx.getStorageSync('serverBase') || '');
     const isOldLocalValue = stored.includes('127.0.0.1') || stored.includes('localhost');
     const isLegacyUsbPreset = stored.includes('192.168.137.1:8765');
-    const configuredBase = config.serverBase;
+    const configuredBase = config.normalizeServerBase(config.serverBase);
     this.globalData.serverBase = configuredBase;
     wx.setStorageSync('serverBase', configuredBase);
     this.globalData.requestBase = buildRequestBase(this.globalData.serverBase);

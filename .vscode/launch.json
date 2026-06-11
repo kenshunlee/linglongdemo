@@ -2,41 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "ASR Backend (Debug, GLM-ASR-2512)",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/backend/server.py",
-      "python": "C:/Users/小花花/AppData/Local/Programs/Python/Python312/python.exe",
-      "console": "integratedTerminal",
-      "cwd": "${workspaceFolder}",
-      "envFile": "${workspaceFolder}/backend/cloud.env",
-      "subProcess": true,
-      "redirectOutput": true,
-      "justMyCode": false,
-      "env": {
-        "PHI3_FIRST": "0",
-        "LOCAL_ASR_ENABLED": "0",
-        "ASR_OUTPUT_DIR": "${workspaceFolder}/output"
-      }
-    },
-    {
-      "name": "ASR Backend (Attach :5678)",
-      "type": "debugpy",
-      "request": "attach",
-      "connect": {
-        "host": "127.0.0.1",
-        "port": 5678
-      },
-      "justMyCode": false
-    },
-    {
       "name": "ASR Backend (One-click Debug)",
       "type": "debugpy",
       "request": "attach",
       "preLaunchTask": "ASR Backend: Start Debug Attach",
       "connect": {
         "host": "127.0.0.1",
-        "port": 5678
+        "port": 5679
       },
       "justMyCode": false
     }

@@ -7,8 +7,21 @@ set "ROOT_DIR=%~dp0.."
 set "PYTHON_EXE=%ROOT_DIR%\.venv\Scripts\python.exe"
 set "PYTHON_ARGS="
 set "ENV_FILE=%~dp0cloud.env"
-set "DEBUG_PORT=5678"
+set "DEBUG_PORT=%DEBUG_PORT%"
+set "SERVICE_PORT=%PORT%"
 set "WAIT_FLAG=--wait-for-client"
+
+if "%DEBUG_PORT%"=="" (
+  set "DEBUG_PORT=5679"
+)
+
+if "%SERVICE_PORT%"=="" (
+  set "SERVICE_PORT=%ASR_PORT%"
+)
+
+if "%SERVICE_PORT%"=="" (
+  set "SERVICE_PORT=8765"
+)
 
 if not exist "%PYTHON_EXE%" (
   set "PYTHON_EXE=py"
@@ -17,6 +30,10 @@ if not exist "%PYTHON_EXE%" (
 
 if /I "%~1"=="--no-wait" (
   set "WAIT_FLAG="
+)
+
+if "%SERVICE_PORT%"=="%DEBUG_PORT%" (
+  set /A DEBUG_PORT+=1
 )
 
 %PYTHON_EXE% %PYTHON_ARGS% -V >nul 2>&1
@@ -57,12 +74,10 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo [INFO] Python   : %PYTHON_EXE%
-echo [INFO] debugpy  : python -m debugpy
-echo [INFO] App      : backend/server.py
-echo [INFO] Listen   : 127.0.0.1:%DEBUG_PORT%
+echo [INFO] Service  : http://127.0.0.1:%SERVICE_PORT%
+echo [INFO] Debug    : 127.0.0.1:%DEBUG_PORT%
 if "%WAIT_FLAG%"=="" (
-  echo [INFO] Start without wait-for-client
+  echo [INFO] Debug mode: no-wait
 ) else (
   echo [INFO] Waiting for VS Code attach...
 )

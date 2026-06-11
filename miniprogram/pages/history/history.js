@@ -1,6 +1,7 @@
 // pages/history/history.js
 
 const app = getApp();
+const config = require('../../config');
 
 Page({
   data: {
@@ -28,7 +29,7 @@ Page({
   },
 
   loadRecords(cb) {
-    const base = wx.getStorageSync('serverBase') || app.globalData.serverBase;
+    const base = config.normalizeServerBase(wx.getStorageSync('serverBase') || app.globalData.serverBase);
     this.setData({ isLoading: true });
 
     wx.request({

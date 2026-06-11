@@ -2,6 +2,8 @@
 
 本项目用于临时 Demo：后端运行在本机，优先使用本地 GPU 算力；安卓真机小程序通过 LAN 或 USB 网络共享访问本机服务。
 
+Demo 场景统一单端口：业务服务与调试都使用 `8765`（调试采用 launch 模式，不再额外占用 debug 监听端口），机器人 SDK 仍然使用 `3336/3333/4141`。
+
 ## 架构
 
 ```
@@ -110,6 +112,17 @@ Invoke-RestMethod -Uri http://127.0.0.1:8765/health | ConvertTo-Json -Depth 6
 - device
 - gpu_available
 - local_asr_ready
+
+### 4) 调试后端
+
+1. 打开 VS Code 的“运行和调试”。
+2. 选择 `ASR Backend: One-click Debug`。
+3. 该配置会先执行 `backend/start-debug-attach.bat` 拉起后端服务，再自动 attach 到 `127.0.0.1:5679`。
+4. 断点打在 `backend/server.py`、`robot_control.py` 或其他后端文件里都可以直接命中。
+
+### 5) Release 运行
+
+非调试场景直接运行 `backend/start.bat` 即可，脚本会使用业务端口启动服务（默认 `8765`）。
 
 ## 小程序联调
 

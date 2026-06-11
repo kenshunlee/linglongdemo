@@ -49,9 +49,9 @@ Page({
   // ─────── 生命周期 ───────
   onLoad() {
     const presets = app.globalData.serverPresets || config.serverPresets || [];
-    const stored = wx.getStorageSync('serverBase');
+    const stored = config.normalizeServerBase(wx.getStorageSync('serverBase'));
     const presetDefault = presets.length > 0 ? presets[0].url : '';
-    const base = app.globalData.serverBase || config.serverBase || presetDefault || stored;
+    const base = config.normalizeServerBase(app.globalData.serverBase || config.serverBase || presetDefault || stored);
     const requestBase = this._buildRequestBase(base);
     this.setData({
       serverBase: base,
@@ -141,7 +141,7 @@ Page({
       wx.showToast({ title: '地址须以 http:// 开头', icon: 'none' });
       return;
     }
-    url = url.replace(/\/$/, ''); // 去掉末尾斜杠
+    url = config.normalizeServerBase(url);
     const requestBase = this._buildRequestBase(url);
     this._persistServerBase(url);
     this.setData({
@@ -375,13 +375,14 @@ Page({
   },
 
   _persistServerBase(url) {
-    app.globalData.serverBase = url;
-    app.globalData.requestBase = this._buildRequestBase(url);
-    wx.setStorageSync('serverBase', url);
+    const normalized = config.normalizeServerBase(url);
+    app.globalData.serverBase = normalized;
+    app.globalData.requestBase = this._buildRequestBase(normalized);
+    wx.setStorageSync('serverBase', normalized);
   },
 
   _buildRequestBase(url) {
-    const base = String(url || '').trim().replace(/\/$/, '');
+    const base = config.normalizeServerBase(url);
     if (!base || !base.startsWith('http')) {
       return base;
     }
