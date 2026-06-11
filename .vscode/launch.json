@@ -6,7 +6,7 @@
       "type": "debugpy",
       "request": "launch",
       "program": "${workspaceFolder}/backend/server.py",
-      "python": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+      "python": "C:/Users/小花花/AppData/Local/Programs/Python/Python312/python.exe",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/backend/cloud.env",
@@ -23,6 +23,17 @@
       "name": "ASR Backend (Attach :5678)",
       "type": "debugpy",
       "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5678
+      },
+      "justMyCode": false
+    },
+    {
+      "name": "ASR Backend (One-click Debug)",
+      "type": "debugpy",
+      "request": "attach",
+      "preLaunchTask": "ASR Backend: Start Debug Attach",
       "connect": {
         "host": "127.0.0.1",
         "port": 5678
