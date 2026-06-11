@@ -1,15 +1,15 @@
 // pages/index/index.js — 录音主页逻辑
 
 const app = getApp();
+const config = require('../../config');
 
 // 录音最长时间（秒）
 const MAX_RECORD_SECONDS = 60;
-const DEFAULT_SERVER_BASE = 'http://192.168.1.132:8765';
 
 Page({
   data: {
-    serverBase: DEFAULT_SERVER_BASE,
-    requestBase: DEFAULT_SERVER_BASE,
+    serverBase: config.serverBase,
+    requestBase: config.serverBase,
     serverPresets: [],
     presetIndex: 0,
     serverConnected: false,
@@ -48,10 +48,10 @@ Page({
 
   // ─────── 生命周期 ───────
   onLoad() {
-    const presets = app.globalData.serverPresets || [];
+    const presets = app.globalData.serverPresets || config.serverPresets || [];
     const stored = wx.getStorageSync('serverBase');
     const presetDefault = presets.length > 0 ? presets[0].url : '';
-    const base = stored || app.globalData.serverBase || presetDefault || DEFAULT_SERVER_BASE;
+    const base = app.globalData.serverBase || config.serverBase || presetDefault || stored;
     const requestBase = this._buildRequestBase(base);
     this.setData({
       serverBase: base,

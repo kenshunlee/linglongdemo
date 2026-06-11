@@ -4,11 +4,16 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "ROOT_DIR=%~dp0.."
-set "PYTHON_EXE=py"
-set "PYTHON_ARGS=-3.12"
+set "PYTHON_EXE=%ROOT_DIR%\.venv\Scripts\python.exe"
+set "PYTHON_ARGS="
 set "ENV_FILE=%~dp0cloud.env"
 set "DEBUG_PORT=5678"
 set "WAIT_FLAG=--wait-for-client"
+
+if not exist "%PYTHON_EXE%" (
+  set "PYTHON_EXE=py"
+  set "PYTHON_ARGS=-3.12"
+)
 
 if /I "%~1"=="--no-wait" (
   set "WAIT_FLAG="
@@ -36,41 +41,24 @@ if exist "%ENV_FILE%" (
 set "PHI3_FIRST=0"
 set "LOCAL_ASR_ENABLED=0"
 set "ASR_OUTPUT_DIR=%ROOT_DIR%\output"
-set "DEBUGPY_SOURCE=.venv"
-
-set "DEBUGPY_BUNDLED_LIBS="
-for /f "delims=" %%D in ('dir /b /ad "%USERPROFILE%\.vscode\extensions\ms-python.debugpy-*" 2^>nul') do (
-  set "DEBUGPY_BUNDLED_LIBS=%USERPROFILE%\.vscode\extensions\%%D\bundled\libs"
-)
 
 %PYTHON_EXE% %PYTHON_ARGS% -c "import debugpy" >nul 2>nul
 if errorlevel 1 (
-  set "DEBUGPY_SOURCE=vscode-extension"
-  if "%DEBUGPY_BUNDLED_LIBS%"=="" (
-    echo [ERROR] debugpy is not available in .venv and VS Code debugpy extension was not found.
-    exit /b 1
-  )
-  if not exist "%DEBUGPY_BUNDLED_LIBS%\debugpy\__init__.py" (
-    echo [ERROR] debugpy package not found: %DEBUGPY_BUNDLED_LIBS%\debugpy
-    exit /b 1
-  )
-  set "PYTHONPATH=%DEBUGPY_BUNDLED_LIBS%;%PYTHONPATH%"
+  echo [ERROR] debugpy is not available for Python 3.12.
+  echo [ERROR] Suggestion: install debugpy into this Python environment.
+  exit /b 1
 )
 
 %PYTHON_EXE% %PYTHON_ARGS% -m debugpy --version >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] debugpy runtime check failed.
   echo [ERROR] Python: %PYTHON_EXE% %PYTHON_ARGS%
-  echo [ERROR] Suggestion: install debugpy for Python 3.12 or use the VS Code bundled debugpy extension.
+  echo [ERROR] Suggestion: install debugpy for Python 3.12.
   exit /b 1
 )
 
 echo [INFO] Python   : %PYTHON_EXE%
-if /I "%DEBUGPY_SOURCE%"==".venv" (
-  echo [INFO] debugpy  : .venv via python -m debugpy
-) else (
-  echo [INFO] debugpy  : %DEBUGPY_BUNDLED_LIBS%\debugpy
-)
+echo [INFO] debugpy  : python -m debugpy
 echo [INFO] App      : backend/server.py
 echo [INFO] Listen   : 127.0.0.1:%DEBUG_PORT%
 if "%WAIT_FLAG%"=="" (

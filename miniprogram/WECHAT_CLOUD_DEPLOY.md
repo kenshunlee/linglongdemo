@@ -82,7 +82,7 @@ FALLBACK_MODEL=phi3
 
 ## 6. 更新小程序请求地址
 
-修改 `miniprogram/app.js` 中的 `serverBase`：
+修改 `miniprogram/config.js` 中的 `serverBase`：
 
 ```js
 serverBase: 'https://api.yourdomain.com/asr'

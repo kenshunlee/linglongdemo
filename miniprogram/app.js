@@ -1,5 +1,5 @@
 // app.js — 全局配置与初始化
-const DEFAULT_SERVER_BASE = 'http://192.168.1.132:8765';
+const config = require('./config');
 const AUTO_UPGRADE_TO_HTTPS = true;
 
 function isLocalLoopback(base) {
@@ -23,25 +23,9 @@ function buildRequestBase(serverBase) {
 App({
   globalData: {
     // 默认地址优先用于安卓 USB 网络共享调试，真机请按实际网段调整
-    serverBase: DEFAULT_SERVER_BASE,
-    requestBase: buildRequestBase(DEFAULT_SERVER_BASE),
-    serverPresets: [
-      {
-        key: 'usb',
-        label: 'USB 共享网络 IP',
-        url: DEFAULT_SERVER_BASE,
-      },
-      {
-        key: 'lan',
-        label: '局域网 IP',
-        url: 'http://192.168.1.132:8765',
-      },
-      {
-        key: 'tunnel',
-        label: '临时隧道地址',
-        url: 'https://example.ngrok-free.app',
-      }
-    ],
+    serverBase: config.serverBase,
+    requestBase: buildRequestBase(config.serverBase),
+    serverPresets: config.serverPresets,
 
     // 连接状态
     serverConnected: false,
@@ -55,15 +39,15 @@ App({
     const stored = wx.getStorageSync('serverBase') || '';
     const isOldLocalValue = stored.includes('127.0.0.1') || stored.includes('localhost');
     const isLegacyUsbPreset = stored.includes('192.168.137.1:8765');
-    if (stored && !isOldLocalValue) {
-      this.globalData.serverBase = isLegacyUsbPreset ? DEFAULT_SERVER_BASE : stored;
-    } else {
-      this.globalData.serverBase = DEFAULT_SERVER_BASE;
-      wx.setStorageSync('serverBase', DEFAULT_SERVER_BASE);
-    }
+    const configuredBase = config.serverBase;
+    this.globalData.serverBase = configuredBase;
+    wx.setStorageSync('serverBase', configuredBase);
     this.globalData.requestBase = buildRequestBase(this.globalData.serverBase);
     if (isLegacyUsbPreset) {
-      wx.setStorageSync('serverBase', DEFAULT_SERVER_BASE);
+      wx.setStorageSync('serverBase', configuredBase);
+    }
+    if (stored && isOldLocalValue) {
+      wx.setStorageSync('serverBase', configuredBase);
     }
     // 检查服务连接状态
     this.checkServerHealth();
