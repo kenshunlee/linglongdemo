@@ -23,17 +23,6 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 from multipart import parse_form
-from robot_control import maybe_handle_robot_request, robot_service
-from reflow_client import ReflowClient, ReflowConfig
-from mission_controller import MissionController
-from mission_reflow_bridge import MissionReflowBridge
-
-# from zai import ZhipuAiClient
-
-try:
-    from faster_whisper import WhisperModel  # type: ignore[import-not-found]
-except Exception:
-    WhisperModel = None
 
 
 def load_env_file(env_path: Path) -> None:
@@ -76,6 +65,24 @@ def _as_bool(v: str | None, default: bool = False) -> bool:
 
 
 load_env_file(Path(__file__).with_name("cloud.env"))
+
+from robot_control import maybe_handle_robot_request, robot_service
+from reflow_client import ReflowClient, ReflowConfig
+from mission_controller import MissionController
+from mission_reflow_bridge import MissionReflowBridge
+
+# from zai import ZhipuAiClient
+
+try:
+    from faster_whisper import WhisperModel  # type: ignore[import-not-found]
+except Exception:
+    WhisperModel = None
+# 显式同步机器人环境配置，避免任何导入时序导致的默认值回退。
+robot_service.backend_local_ip = os.getenv("BACKEND_LOCAL_IP", "")
+robot_service.robot_ip = os.getenv("ROBOT_IP", robot_service.robot_ip)
+robot_service.cmd_port = int(os.getenv("ROBOT_CMD_PORT", str(robot_service.cmd_port)))
+robot_service.state_port = int(os.getenv("ROBOT_STATE_PORT", str(robot_service.state_port)))
+robot_service.mode_port = int(os.getenv("ROBOT_MODE_PORT", str(robot_service.mode_port)))
 # ------------------- 配置区 -------------------
 ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
 ZHIPU_BASE_URL = os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
@@ -91,6 +98,7 @@ DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[1] / "output"
 OUTPUT_DIR = Path(os.getenv("ASR_OUTPUT_DIR", str(DEFAULT_OUTPUT_DIR)))
 LISTEN_HOST = os.getenv("ASR_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.getenv("PORT", os.getenv("ASR_PORT", "8765")))
+BACKEND_LOCAL_IP = os.getenv("BACKEND_LOCAL_IP", "")
 USB_DEBUG_PREFERRED = os.getenv("USB_DEBUG_PREFERRED", "1") == "1"
 if USB_DEBUG_PREFERRED and LISTEN_HOST in {"127.0.0.1", "localhost", "::1"}:
     LISTEN_HOST = "0.0.0.0"
@@ -1058,6 +1066,8 @@ def main():
         log.info(f"回流账号: {REFLOW_LOGIN_NAME or '<unset>'}")
     log.info(f"任务编排: {'enabled' if MISSION_ENABLED else 'disabled'} (dry_run={MISSION_DRY_RUN})")
     log.info(f"监听: http://{LISTEN_HOST}:{LISTEN_PORT}")
+    if BACKEND_LOCAL_IP:
+        log.info(f"本机IP(环境): http://{BACKEND_LOCAL_IP}:{LISTEN_PORT}")
     ips = _sort_usb_addresses(get_ipv4_addresses())
     for ip in ips:
         log.info(f"可用于手机调试的地址: http://{ip}:{LISTEN_PORT}")

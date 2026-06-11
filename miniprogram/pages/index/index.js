@@ -4,10 +4,12 @@ const app = getApp();
 
 // 录音最长时间（秒）
 const MAX_RECORD_SECONDS = 60;
+const DEFAULT_SERVER_BASE = 'http://192.168.1.132:8765';
 
 Page({
   data: {
-    serverBase: '',
+    serverBase: DEFAULT_SERVER_BASE,
+    requestBase: DEFAULT_SERVER_BASE,
     serverPresets: [],
     presetIndex: 0,
     serverConnected: false,
@@ -48,14 +50,18 @@ Page({
   onLoad() {
     const presets = app.globalData.serverPresets || [];
     const stored = wx.getStorageSync('serverBase');
-    const base = stored || app.globalData.serverBase;
+    const presetDefault = presets.length > 0 ? presets[0].url : '';
+    const base = stored || app.globalData.serverBase || presetDefault || DEFAULT_SERVER_BASE;
+    const requestBase = this._buildRequestBase(base);
     this.setData({
       serverBase: base,
+      requestBase,
       serverInput: base,
       serverPresets: presets,
       presetIndex: this._findPresetIndexByUrl(base, presets),
     });
     app.globalData.serverBase = base;
+    app.globalData.requestBase = requestBase;
   },
 
   onShow() {
@@ -73,7 +79,7 @@ Page({
 
   // ─────── 连接检查 ───────
   checkConnection() {
-    const base = this.data.serverBase;
+    const base = this.data.requestBase || this._buildRequestBase(this.data.serverBase);
     wx.request({
       url: `${base}/health`,
       timeout: 5000,
@@ -136,9 +142,11 @@ Page({
       return;
     }
     url = url.replace(/\/$/, ''); // 去掉末尾斜杠
+    const requestBase = this._buildRequestBase(url);
     this._persistServerBase(url);
     this.setData({
       serverBase: url,
+      requestBase,
       serverInput: url,
       showServerModal: false,
       presetIndex: this._findPresetIndexByUrl(url, this.data.serverPresets),
@@ -269,7 +277,7 @@ Page({
 
   // ─────── 上传与转写 ───────
   _uploadAudio(filePath, duration, originalName) {
-    const base = this.data.serverBase;
+    const base = this.data.requestBase || this._buildRequestBase(this.data.serverBase);
     const fileName = originalName || `record_${Date.now()}.aac`;
 
     this.setData({
@@ -368,7 +376,23 @@ Page({
 
   _persistServerBase(url) {
     app.globalData.serverBase = url;
+    app.globalData.requestBase = this._buildRequestBase(url);
     wx.setStorageSync('serverBase', url);
+  },
+
+  _buildRequestBase(url) {
+    const base = String(url || '').trim().replace(/\/$/, '');
+    if (!base || !base.startsWith('http')) {
+      return base;
+    }
+    if (base.startsWith('https://')) {
+      return base;
+    }
+    const isLocal = base.includes('127.0.0.1') || base.includes('localhost') || base.includes('0.0.0.0');
+    if (isLocal) {
+      return base;
+    }
+    return `https://${base.slice('http://'.length)}`;
   },
 
   _findPresetIndexByUrl(url, presets) {

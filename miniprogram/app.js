@@ -1,10 +1,30 @@
 // app.js — 全局配置与初始化
-const DEFAULT_SERVER_BASE = 'http://192.168.137.1:8765';
+const DEFAULT_SERVER_BASE = 'http://192.168.1.132:8765';
+const AUTO_UPGRADE_TO_HTTPS = true;
+
+function isLocalLoopback(base) {
+  return base.includes('127.0.0.1') || base.includes('localhost') || base.includes('0.0.0.0');
+}
+
+function buildRequestBase(serverBase) {
+  const base = String(serverBase || '').trim().replace(/\/$/, '');
+  if (!base || !base.startsWith('http')) {
+    return base;
+  }
+  if (base.startsWith('https://')) {
+    return base;
+  }
+  if (!AUTO_UPGRADE_TO_HTTPS || isLocalLoopback(base)) {
+    return base;
+  }
+  return `https://${base.slice('http://'.length)}`;
+}
 
 App({
   globalData: {
     // 默认地址优先用于安卓 USB 网络共享调试，真机请按实际网段调整
     serverBase: DEFAULT_SERVER_BASE,
+    requestBase: buildRequestBase(DEFAULT_SERVER_BASE),
     serverPresets: [
       {
         key: 'usb',
@@ -14,7 +34,7 @@ App({
       {
         key: 'lan',
         label: '局域网 IP',
-        url: 'http://172.18.1.79:8765',
+        url: 'http://192.168.1.132:8765',
       },
       {
         key: 'tunnel',
@@ -34,10 +54,15 @@ App({
     console.log('[App] onLaunch');
     const stored = wx.getStorageSync('serverBase') || '';
     const isOldLocalValue = stored.includes('127.0.0.1') || stored.includes('localhost');
+    const isLegacyUsbPreset = stored.includes('192.168.137.1:8765');
     if (stored && !isOldLocalValue) {
-      this.globalData.serverBase = stored;
+      this.globalData.serverBase = isLegacyUsbPreset ? DEFAULT_SERVER_BASE : stored;
     } else {
       this.globalData.serverBase = DEFAULT_SERVER_BASE;
+      wx.setStorageSync('serverBase', DEFAULT_SERVER_BASE);
+    }
+    this.globalData.requestBase = buildRequestBase(this.globalData.serverBase);
+    if (isLegacyUsbPreset) {
       wx.setStorageSync('serverBase', DEFAULT_SERVER_BASE);
     }
     // 检查服务连接状态
@@ -52,7 +77,7 @@ App({
    * 检查后端服务健康状态
    */
   checkServerHealth() {
-    const base = this.globalData.serverBase;
+    const base = this.globalData.requestBase || buildRequestBase(this.globalData.serverBase);
     if (!base || !base.startsWith('http')) {
       return;
     }

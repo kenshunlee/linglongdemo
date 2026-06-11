@@ -41,6 +41,7 @@ class RobotControlService:
     def __init__(self) -> None:
         self.enabled = _as_bool(os.getenv("ROBOT_SDK_ENABLED", "1"), True)
 
+        self.backend_local_ip = os.getenv("BACKEND_LOCAL_IP", "")
         self.robot_ip = os.getenv("ROBOT_IP", "192.168.1.28")
         self.cmd_port = int(os.getenv("ROBOT_CMD_PORT", "3336"))
         self.state_port = int(os.getenv("ROBOT_STATE_PORT", "3333"))
@@ -110,6 +111,7 @@ class RobotControlService:
             "enabled": self.enabled,
             "sdk_ready": self._sdk_ready,
             "sdk_reason": self._sdk_reason,
+            "backend_local_ip": self.backend_local_ip,
             "robot_ip": self.robot_ip,
             "cmd_port": self.cmd_port,
             "state_port": self.state_port,
