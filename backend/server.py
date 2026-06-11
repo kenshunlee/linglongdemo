@@ -257,7 +257,9 @@ def transcribe_with_zhipu_asr(audio_path: str) -> str:
     url = f"{ZHIPU_BASE_URL.rstrip('/')}/audio/transcriptions"
     payload = {
         "model": ZHIPU_ASR_MODEL,
-        "stream": "false",
+        "stream": "true",
+        # 该接口为非流式转写，multipart 场景下不要传字符串 "false"，避免 400
+        # 如需流式应走 SSE/stream 接口。
     }
     headers = {"Authorization": f"Bearer {ZHIPU_API_KEY}"}
 
@@ -269,7 +271,8 @@ def transcribe_with_zhipu_asr(audio_path: str) -> str:
         }
         with httpx.Client(timeout=120) as client:
             response = client.post(url, data=payload, files=files, headers=headers)
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise ValueError(f"GLM-ASR 请求失败({response.status_code}): {response.text}")
         data = response.json()
 
     text = (

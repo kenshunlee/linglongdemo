@@ -6,6 +6,29 @@ const config = require('../../config');
 // 录音最长时间（秒）
 const MAX_RECORD_SECONDS = 60;
 
+function isPrivateIpv4Host(host) {
+  const h = String(host || '').trim();
+  const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 10 || a === 127) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 169 && b === 254) return true;
+  return false;
+}
+
+function shouldKeepHttp(base) {
+  const u = String(base || '').trim();
+  if (u.includes('127.0.0.1') || u.includes('localhost') || u.includes('0.0.0.0')) {
+    return true;
+  }
+  const m = u.match(/^https?:\/\/([^\/:?#]+)/i);
+  if (!m) return false;
+  return isPrivateIpv4Host(m[1]);
+}
+
 Page({
   data: {
     serverBase: config.serverBase,
@@ -62,6 +85,7 @@ Page({
     });
     app.globalData.serverBase = base;
     app.globalData.requestBase = requestBase;
+    this._initRecorderManager();
   },
 
   onShow() {
@@ -79,42 +103,62 @@ Page({
 
   // ─────── 连接检查 ───────
   checkConnection() {
-    const base = this.data.requestBase || this._buildRequestBase(this.data.serverBase);
-    wx.request({
-      url: `${base}/health`,
-      timeout: 5000,
-      success: (res) => {
-        if (res.statusCode === 200) {
-          this.setData({
-            serverConnected: true,
-            asrProvider: res.data.asr_provider || '',
-            asrModel: res.data.asr_model || '',
-            zhipuConfigured: !!res.data.zhipu_configured,
-            activeEngine: res.data.active_engine || '',
-            device: res.data.device || '',
-            gpuAvailable: !!res.data.gpu_available,
-          });
-          app.globalData.serverConnected = true;
-          app.globalData.asrProvider = res.data.asr_provider || '';
-          app.globalData.asrModel = res.data.asr_model || '';
-          app.globalData.zhipuConfigured = !!res.data.zhipu_configured;
-          app.globalData.activeEngine = res.data.active_engine || '';
-          app.globalData.device = res.data.device || '';
-          app.globalData.gpuAvailable = !!res.data.gpu_available;
-        }
-      },
-      fail: () => {
-        this.setData({
-          serverConnected: false,
-          asrProvider: '',
-          asrModel: '',
-          zhipuConfigured: false,
-          activeEngine: '',
-          device: '',
-          gpuAvailable: false,
-        });
+    const requestBase = this.data.requestBase || this._buildRequestBase(this.data.serverBase);
+    const rawBase = config.normalizeServerBase(this.data.serverBase);
+    const bases = [];
+    if (requestBase && requestBase.startsWith('http')) bases.push(requestBase);
+    if (rawBase && rawBase.startsWith('http') && !bases.includes(rawBase)) bases.push(rawBase);
+    const applyDisconnected = () => {
+      this.setData({
+        serverConnected: false,
+        asrProvider: '',
+        asrModel: '',
+        zhipuConfigured: false,
+        activeEngine: '',
+        device: '',
+        gpuAvailable: false,
+      });
+      app.globalData.serverConnected = false;
+    };
+    const tryHealth = (idx) => {
+      if (idx >= bases.length) {
+        applyDisconnected();
+        return;
       }
-    });
+      const base = bases[idx];
+      wx.request({
+        url: `${base}/health`,
+        timeout: 5000,
+        success: (res) => {
+          if (res.statusCode === 200) {
+            this.setData({
+              serverConnected: true,
+              requestBase: base,
+              asrProvider: res.data.asr_provider || '',
+              asrModel: res.data.asr_model || '',
+              zhipuConfigured: !!res.data.zhipu_configured,
+              activeEngine: res.data.active_engine || '',
+              device: res.data.device || '',
+              gpuAvailable: !!res.data.gpu_available,
+            });
+            app.globalData.serverConnected = true;
+            app.globalData.requestBase = base;
+            app.globalData.asrProvider = res.data.asr_provider || '';
+            app.globalData.asrModel = res.data.asr_model || '';
+            app.globalData.zhipuConfigured = !!res.data.zhipu_configured;
+            app.globalData.activeEngine = res.data.active_engine || '';
+            app.globalData.device = res.data.device || '';
+            app.globalData.gpuAvailable = !!res.data.gpu_available;
+            return;
+          }
+          tryHealth(idx + 1);
+        },
+        fail: () => {
+          tryHealth(idx + 1);
+        }
+      });
+    };
+    tryHealth(0);
   },
 
   // ─────── 服务器地址管理 ───────
@@ -164,16 +208,11 @@ Page({
   },
 
   onRecordEnd() {
-    if (this.data.isRecording) {
-      this._stopRecording();
-    }
+    this._stopRecording();
   },
 
   onRecordCancel() {
-    // 手指移出按钮区域时取消
-    if (this.data.isRecording) {
-      this._cancelRecording();
-    }
+    this._stopRecording();
   },
 
   onGoManualControl() {
@@ -182,11 +221,13 @@ Page({
     });
   },
 
-  _startRecording() {
+  _initRecorderManager() {
+    if (this.recManager) return;
     const recManager = wx.getRecorderManager();
     this.recManager = recManager;
 
     recManager.onStart(() => {
+      this._recordStopping = false;
       console.log('[Rec] 开始录音');
       this.setData({ isRecording: true, recordDuration: 0, errorMsg: '' });
       this._startTimer();
@@ -194,6 +235,11 @@ Page({
 
     recManager.onStop((res) => {
       console.log('[Rec] 停止录音', res);
+      this._recordStopping = false;
+      if (this._stopFallbackTimer) {
+        clearTimeout(this._stopFallbackTimer);
+        this._stopFallbackTimer = null;
+      }
       this._stopTimer();
       this.setData({ isRecording: false });
       if (res.duration < 500) {
@@ -205,12 +251,27 @@ Page({
 
     recManager.onError((err) => {
       console.error('[Rec] 录音错误', err);
+      this._recordStopping = false;
+      if (this._stopFallbackTimer) {
+        clearTimeout(this._stopFallbackTimer);
+        this._stopFallbackTimer = null;
+      }
       this._stopTimer();
       this.setData({ isRecording: false });
       this._showError(`录音失败：${err.errMsg}`, false);
     });
+  },
 
-    recManager.start({
+  _startRecording() {
+    this._initRecorderManager();
+    if (!this.recManager) {
+      this._showError('录音组件初始化失败', false);
+      return;
+    }
+    if (this.data.isRecording || this._recordStopping) {
+      return;
+    }
+    this.recManager.start({
       duration: MAX_RECORD_SECONDS * 1000,
       sampleRate: 16000,
       numberOfChannels: 1,
@@ -220,18 +281,22 @@ Page({
   },
 
   _stopRecording() {
-    if (this.recManager) {
-      this.recManager.stop();
+    if (!this.recManager || !this.data.isRecording || this._recordStopping) {
+      return;
     }
-  },
+    this._recordStopping = true;
+    this.recManager.stop();
 
-  _cancelRecording() {
-    if (this.recManager) {
-      this.recManager.stop();
+    // 极端情况下 onStop 未及时回调时，先回收页面状态，避免“看起来还在录音”。
+    if (this._stopFallbackTimer) {
+      clearTimeout(this._stopFallbackTimer);
     }
-    this._stopTimer();
-    this.setData({ isRecording: false });
-    wx.showToast({ title: '已取消录音', icon: 'none' });
+    this._stopFallbackTimer = setTimeout(() => {
+      if (!this._recordStopping) return;
+      this._recordStopping = false;
+      this._stopTimer();
+      this.setData({ isRecording: false });
+    }, 1200);
   },
 
   _startTimer() {
@@ -389,8 +454,7 @@ Page({
     if (base.startsWith('https://')) {
       return base;
     }
-    const isLocal = base.includes('127.0.0.1') || base.includes('localhost') || base.includes('0.0.0.0');
-    if (isLocal) {
+    if (shouldKeepHttp(base)) {
       return base;
     }
     return `https://${base.slice('http://'.length)}`;
@@ -408,5 +472,9 @@ Page({
 
   onUnload() {
     this._stopTimer();
+    if (this._stopFallbackTimer) {
+      clearTimeout(this._stopFallbackTimer);
+      this._stopFallbackTimer = null;
+    }
   }
 });

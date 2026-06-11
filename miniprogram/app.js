@@ -6,6 +6,32 @@ function isLocalLoopback(base) {
   return base.includes('127.0.0.1') || base.includes('localhost') || base.includes('0.0.0.0');
 }
 
+function isPrivateIpv4Host(host) {
+  const h = String(host || '').trim();
+  const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) {
+    return false;
+  }
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+  if (a === 10 || a === 127) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 169 && b === 254) return true;
+  return false;
+}
+
+function shouldKeepHttp(base) {
+  if (isLocalLoopback(base)) {
+    return true;
+  }
+  const m = String(base || '').trim().match(/^https?:\/\/([^\/:?#]+)/i);
+  if (!m) {
+    return false;
+  }
+  return isPrivateIpv4Host(m[1]);
+}
+
 function buildRequestBase(serverBase) {
   const base = String(serverBase || '').trim().replace(/\/$/, '');
   if (!base || !base.startsWith('http')) {
@@ -14,7 +40,7 @@ function buildRequestBase(serverBase) {
   if (base.startsWith('https://')) {
     return base;
   }
-  if (!AUTO_UPGRADE_TO_HTTPS || isLocalLoopback(base)) {
+  if (!AUTO_UPGRADE_TO_HTTPS || shouldKeepHttp(base)) {
     return base;
   }
   return `https://${base.slice('http://'.length)}`;
@@ -61,30 +87,44 @@ App({
    * 检查后端服务健康状态
    */
   checkServerHealth() {
-    const base = this.globalData.requestBase || buildRequestBase(this.globalData.serverBase);
-    if (!base || !base.startsWith('http')) {
+    const requestBase = this.globalData.requestBase || buildRequestBase(this.globalData.serverBase);
+    const rawBase = config.normalizeServerBase(this.globalData.serverBase);
+    const bases = [];
+    if (requestBase && requestBase.startsWith('http')) bases.push(requestBase);
+    if (rawBase && rawBase.startsWith('http') && !bases.includes(rawBase)) bases.push(rawBase);
+    if (!bases.length) {
       return;
     }
-    wx.request({
-      url: `${base}/health`,
-      method: 'GET',
-      timeout: 5000,
-      success: (res) => {
-        if (res.statusCode === 200) {
-          this.globalData.serverConnected = true;
-          this.globalData.asrProvider = res.data.asr_provider || '';
-          this.globalData.asrModel = res.data.asr_model || '';
-          this.globalData.zhipuConfigured = !!res.data.zhipu_configured;
-          console.log('[App] 服务连接正常', res.data);
-        }
-      },
-      fail: (err) => {
+    const tryHealth = (idx) => {
+      if (idx >= bases.length) {
         this.globalData.serverConnected = false;
         this.globalData.asrProvider = '';
         this.globalData.asrModel = '';
         this.globalData.zhipuConfigured = false;
-        console.warn('[App] 服务连接失败', err);
+        return;
       }
-    });
+      const base = bases[idx];
+      wx.request({
+        url: `${base}/health`,
+        method: 'GET',
+        timeout: 5000,
+        success: (res) => {
+          if (res.statusCode === 200) {
+            this.globalData.serverConnected = true;
+            this.globalData.asrProvider = res.data.asr_provider || '';
+            this.globalData.asrModel = res.data.asr_model || '';
+            this.globalData.zhipuConfigured = !!res.data.zhipu_configured;
+            this.globalData.requestBase = base;
+            console.log('[App] 服务连接正常', res.data);
+            return;
+          }
+          tryHealth(idx + 1);
+        },
+        fail: () => {
+          tryHealth(idx + 1);
+        }
+      });
+    };
+    tryHealth(0);
   }
 });

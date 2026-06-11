@@ -74,6 +74,7 @@ class RobotControlService:
         self._last_error = ""
         self._motion_prepared = False
         self._last_motion_diag: dict[str, Any] = {}
+        self._last_action_result: dict[str, Any] = {}
 
         # 动作预置（近似动作，可按现场再调）
         self.left_extend_eef = [0.45, 0.30, 0.82, 0.0, 0.0, 0.0]
@@ -141,6 +142,7 @@ class RobotControlService:
                 "strict": self.motion_strict,
                 "prepared": self._motion_prepared,
                 "last_diag": self._last_motion_diag,
+                "last_action_result": self._last_action_result,
             },
             "config_root": str(self.config_root),
             "camera": {
@@ -188,12 +190,136 @@ class RobotControlService:
             time.sleep(min(self.mode_settle_s, 1.0))
         self._motion_prepared = True
 
+    @staticmethod
+    def _build_action_result(
+        *,
+        ok: bool,
+        reason: str = "",
+        suggestion: str = "",
+        diag: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        result = {
+            "check_result": bool(ok),
+            "reason": reason if not ok else "",
+            "suggestion": suggestion if not ok else "",
+        }
+        if diag is not None:
+            result["diag"] = diag
+        return result
+
+    def _remember_action_result(self, result: dict[str, Any]) -> None:
+        self._last_action_result = dict(result)
+
     def _sample_base_status(self, timeout_s: float = 0.05) -> tuple[float, float] | None:
         try:
             self._sdk.fetch_robot_state(timeout=float(timeout_s))
             return float(self._sdk.ctrl.car_translation_status), float(self._sdk.ctrl.car_rotation_status)
         except Exception:
             return None
+
+    def _sample_motion_snapshot(self, timeout_s: float = 0.05) -> dict[str, Any] | None:
+        try:
+            self._sdk.fetch_robot_state(timeout=float(timeout_s))
+        except Exception:
+            return None
+
+        sens = self._sdk.sens
+        return {
+            "cap_l": float(sens.cap_rate[0]),
+            "cap_r": float(sens.cap_rate[1]),
+            "left_eef": [float(x) for x in sens.epos_h[0, :6]],
+            "right_eef": [float(x) for x in sens.epos_h[1, :6]],
+            "waist_eef": [float(x) for x in sens.epos_waist[:6]],
+            "base_vx": float(self._sdk.ctrl.car_translation_status),
+            "base_w": float(self._sdk.ctrl.car_rotation_status),
+            "battery": float(self._sdk.battery_level),
+        }
+
+    @staticmethod
+    def _max_pose_error(actual: list[float], target: list[float]) -> float:
+        return max(abs(float(a) - float(b)) for a, b in zip(actual[:6], target[:6]))
+
+    def _verify_cap_feedback(self, target_cap_l: float, target_cap_r: float) -> dict[str, Any]:
+        deadline = time.time() + self.motion_feedback_timeout_s
+        samples = 0
+        max_err_l = float("inf")
+        max_err_r = float("inf")
+        snapshot: dict[str, Any] | None = None
+        while time.time() < deadline:
+            snapshot = self._sample_motion_snapshot(timeout_s=0.05)
+            if snapshot is None:
+                time.sleep(0.03)
+                continue
+            samples += 1
+            max_err_l = abs(float(snapshot["cap_l"]) - float(target_cap_l))
+            max_err_r = abs(float(snapshot["cap_r"]) - float(target_cap_r))
+            if max(max_err_l, max_err_r) <= 0.15:
+                break
+            time.sleep(0.03)
+
+        ok = max(max_err_l, max_err_r) <= 0.15
+        diag = {
+            "verified": True,
+            "ok": ok,
+            "samples": samples,
+            "target_cap_l": float(target_cap_l),
+            "target_cap_r": float(target_cap_r),
+            "actual_cap_l": None if snapshot is None else round(float(snapshot["cap_l"]), 4),
+            "actual_cap_r": None if snapshot is None else round(float(snapshot["cap_r"]), 4),
+            "max_error": None if snapshot is None else round(max(max_err_l, max_err_r), 4),
+            "timeout_s": self.motion_feedback_timeout_s,
+        }
+        if not ok and self.motion_strict:
+            raise RuntimeError(f"夹爪未检测到有效反馈，diag={diag}")
+        return diag
+
+    def _verify_eef_feedback(
+        self,
+        target_eef_l: list[float],
+        target_eef_r: list[float],
+        *,
+        check_left: bool = True,
+        check_right: bool = True,
+    ) -> dict[str, Any]:
+        deadline = time.time() + self.motion_feedback_timeout_s
+        samples = 0
+        last_snapshot: dict[str, Any] | None = None
+        left_err = None
+        right_err = None
+        while time.time() < deadline:
+            last_snapshot = self._sample_motion_snapshot(timeout_s=0.05)
+            if last_snapshot is None:
+                time.sleep(0.03)
+                continue
+            samples += 1
+            if check_left:
+                left_err = self._max_pose_error(last_snapshot["left_eef"], target_eef_l)
+            if check_right:
+                right_err = self._max_pose_error(last_snapshot["right_eef"], target_eef_r)
+            if ((not check_left) or (left_err is not None and left_err <= 0.35)) and (
+                (not check_right) or (right_err is not None and right_err <= 0.35)
+            ):
+                break
+            time.sleep(0.03)
+
+        ok_left = (not check_left) or (left_err is not None and left_err <= 0.35)
+        ok_right = (not check_right) or (right_err is not None and right_err <= 0.35)
+        ok = ok_left and ok_right
+        diag = {
+            "verified": True,
+            "ok": ok,
+            "samples": samples,
+            "target_left": [round(float(x), 4) for x in target_eef_l[:6]],
+            "target_right": [round(float(x), 4) for x in target_eef_r[:6]],
+            "actual_left": None if last_snapshot is None else [round(float(x), 4) for x in last_snapshot["left_eef"]],
+            "actual_right": None if last_snapshot is None else [round(float(x), 4) for x in last_snapshot["right_eef"]],
+            "left_error": None if left_err is None else round(float(left_err), 4),
+            "right_error": None if right_err is None else round(float(right_err), 4),
+            "timeout_s": self.motion_feedback_timeout_s,
+        }
+        if not ok and self.motion_strict:
+            raise RuntimeError(f"末端动作未检测到有效反馈，diag={diag}")
+        return diag
 
     def _verify_motion_feedback(self, expect_vx: float, expect_w: float) -> dict[str, Any]:
         if not self.motion_verify_feedback or (abs(expect_vx) < 1e-6 and abs(expect_w) < 1e-6):
@@ -254,7 +380,13 @@ class RobotControlService:
             self._mode.robot_autonomous_mode()
             self._sdk.reset_to_init(send_time=2.5, mode="eef", interp_start="ctrl")
             self._motion_prepared = True
-            return {"ok": True, "message": "机器人初始化完成（已上使能 + 自主模式 + reset_to_init）"}
+            result = {
+                "ok": True,
+                "message": "机器人初始化完成（已上使能 + 自主模式 + reset_to_init）",
+                **self._build_action_result(ok=True),
+            }
+            self._remember_action_result(result)
+            return result
 
     def move_distance(self, distance_m: float, speed_mps: float = 0.15) -> dict[str, Any]:
         with self._lock:
@@ -275,13 +407,22 @@ class RobotControlService:
             self._sdk.set_base_vel(0.0, 0.0)
             self._sdk.send()
             motion_diag = self._verify_motion_feedback(expect_vx=vx, expect_w=0.0)
-            return {
+            ok = bool(motion_diag.get("moved"))
+            result = {
                 "ok": True,
                 "distance_m": dist,
                 "speed_mps": speed,
                 "duration_s": round(duration, 3),
                 "motion_diag": motion_diag,
+                **self._build_action_result(
+                    ok=ok,
+                    reason="底盘未检测到有效线速度反馈",
+                    suggestion="先检查机器人是否已上使能并处于自主模式，确认 CHASSIS_IP/CHASSIS_CMD_PORT 配置正确，必要时先调用 /robot/init 再重试。",
+                    diag=motion_diag,
+                ),
             }
+            self._remember_action_result(result)
+            return result
 
     def turn_angle(self, angle_deg: float, angular_speed_dps: float = 25.0) -> dict[str, Any]:
         with self._lock:
@@ -302,17 +443,27 @@ class RobotControlService:
             self._sdk.set_base_vel(0.0, 0.0)
             self._sdk.send()
             motion_diag = self._verify_motion_feedback(expect_vx=0.0, expect_w=w)
-            return {
+            ok = bool(motion_diag.get("moved"))
+            result = {
                 "ok": True,
                 "angle_deg": deg,
                 "angular_speed_dps": w_deg,
                 "duration_s": round(duration, 3),
                 "motion_diag": motion_diag,
+                **self._build_action_result(
+                    ok=ok,
+                    reason="底盘未检测到有效角速度反馈",
+                    suggestion="确认底盘 TCP 速度链路可用，检查上使能/自主模式状态，必要时先调用 /robot/init 后再试。",
+                    diag=motion_diag,
+                ),
             }
+            self._remember_action_result(result)
+            return result
 
     def gripper(self, action: str, side: str = "both") -> dict[str, Any]:
         with self._lock:
             self._ensure_clients()
+            self._prepare_motion_mode_if_needed()
             act = action.strip().lower()
             tgt = 1.0 if act == "open" else 0.0
             eef_l, eef_r, waist_pos, waist_att, head_att, cap_l, cap_r = self._current_targets()
@@ -335,26 +486,47 @@ class RobotControlService:
                 target_cap_r=cap_r,
                 interp_start="ctrl",
             )
-            return {"ok": True, "action": act, "side": side, "cap_l": cap_l, "cap_r": cap_r}
+            motion_diag = self._verify_cap_feedback(target_cap_l=cap_l, target_cap_r=cap_r)
+            result = {
+                "ok": True,
+                "action": act,
+                "side": side,
+                "cap_l": cap_l,
+                "cap_r": cap_r,
+                "motion_diag": motion_diag,
+                **self._build_action_result(
+                    ok=bool(motion_diag.get("ok")),
+                    reason="夹爪未检测到有效反馈",
+                    suggestion="确认夹爪机构未被急停或保护限制，检查目标侧夹爪是否可达；若现场允许，可增大反馈超时后重试。",
+                    diag=motion_diag,
+                ),
+            }
+            self._remember_action_result(result)
+            return result
 
     def arm_preset(self, arm: str, preset: str) -> dict[str, Any]:
         with self._lock:
             self._ensure_clients()
+            self._prepare_motion_mode_if_needed()
             arm_norm = arm.strip().lower()
             preset_norm = preset.strip().lower()
 
             eef_l, eef_r, waist_pos, waist_att, head_att, cap_l, cap_r = self._current_targets()
+            check_left = False
+            check_right = False
 
             if arm_norm == "left":
                 if preset_norm == "extend":
                     eef_l = list(self.left_extend_eef)
                 else:
                     eef_l = list(self.left_retract_eef)
+                check_left = True
             elif arm_norm == "right":
                 if preset_norm == "extend":
                     eef_r = list(self.right_extend_eef)
                 else:
                     eef_r = list(self.right_retract_eef)
+                check_right = True
             else:
                 raise ValueError("arm 必须是 left 或 right")
 
@@ -369,7 +541,26 @@ class RobotControlService:
                 target_cap_r=cap_r,
                 interp_start="ctrl",
             )
-            return {"ok": True, "arm": arm_norm, "preset": preset_norm}
+            motion_diag = self._verify_eef_feedback(
+                target_eef_l=eef_l,
+                target_eef_r=eef_r,
+                check_left=check_left,
+                check_right=check_right,
+            )
+            result = {
+                "ok": True,
+                "arm": arm_norm,
+                "preset": preset_norm,
+                "motion_diag": motion_diag,
+                **self._build_action_result(
+                    ok=bool(motion_diag.get("ok")),
+                    reason="机械臂预置未检测到有效末端反馈",
+                    suggestion="确认机器人已进入自主模式且对应臂无碰撞/限位；若末端目标变化较小，可适当放宽反馈阈值或延长超时。",
+                    diag=motion_diag,
+                ),
+            }
+            self._remember_action_result(result)
+            return result
 
     def list_trajectory_tasks(self) -> dict[str, Any]:
         with self._lock:
@@ -382,6 +573,7 @@ class RobotControlService:
     def playback_trajectory(self, task_name: str) -> dict[str, Any]:
         with self._lock:
             self._ensure_clients()
+            self._prepare_motion_mode_if_needed()
             tr = self._sdk_api["traj_replan"]
             ManiInterpStartSource = self._sdk_api["ManiInterpStartSource"]
             name = task_name.strip()
@@ -403,7 +595,24 @@ class RobotControlService:
             )
             if not ok_play:
                 raise RuntimeError("轨迹回放执行失败")
-            return {"ok": True, "task_name": name, "actions": len(bundle.actions)}
+            motion_diag = self._sample_motion_snapshot(timeout_s=self.motion_feedback_timeout_s)
+            result = {
+                "ok": True,
+                "task_name": name,
+                "actions": len(bundle.actions),
+                "motion_diag": {
+                    "verified": motion_diag is not None,
+                    "snapshot": motion_diag,
+                },
+                **self._build_action_result(
+                    ok=motion_diag is not None,
+                    reason="轨迹回放后未能获取到状态快照",
+                    suggestion="检查状态 UDP/TCP 链路是否正常，必要时增加 motion feedback 超时或检查轨迹是否真正触发了硬件动作。",
+                    diag={"snapshot": motion_diag},
+                ),
+            }
+            self._remember_action_result(result)
+            return result
 
     def _camera_url(self, camera_name: str) -> str:
         cam = camera_name.strip().lower()
