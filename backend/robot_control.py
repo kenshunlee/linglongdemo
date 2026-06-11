@@ -46,6 +46,15 @@ class RobotControlService:
         self.cmd_port = int(os.getenv("ROBOT_CMD_PORT", "3336"))
         self.state_port = int(os.getenv("ROBOT_STATE_PORT", "3333"))
         self.mode_port = int(os.getenv("ROBOT_MODE_PORT", "4141"))
+        self.chassis_ip = os.getenv("CHASSIS_IP", "192.168.1.204")
+        self.chassis_cmd_port = int(os.getenv("CHASSIS_CMD_PORT", "19205"))
+        self.chassis_cmd_timeout_s = _parse_float(os.getenv("CHASSIS_CMD_TIMEOUT_S", "0.2"), 0.2)
+        self.mode_settle_s = max(0.0, _parse_float(os.getenv("ROBOT_MODE_SETTLE_S", "0.6"), 0.6))
+        self.motion_auto_prepare = _as_bool(os.getenv("ROBOT_MOTION_AUTO_PREPARE", "1"), True)
+        self.motion_verify_feedback = _as_bool(os.getenv("ROBOT_MOTION_VERIFY_FEEDBACK", "1"), True)
+        self.motion_feedback_timeout_s = max(0.05, _parse_float(os.getenv("ROBOT_MOTION_FEEDBACK_TIMEOUT_S", "0.6"), 0.6))
+        self.motion_feedback_min_v = max(0.001, _parse_float(os.getenv("ROBOT_MOTION_FEEDBACK_MIN_V", "0.01"), 0.01))
+        self.motion_strict = _as_bool(os.getenv("ROBOT_MOTION_STRICT", "0"), False)
 
         # 任务目录：默认优先使用 SDK 文档目录下 config
         self.config_root = Path(
@@ -63,6 +72,8 @@ class RobotControlService:
         self._sdk = None
         self._mode = None
         self._last_error = ""
+        self._motion_prepared = False
+        self._last_motion_diag: dict[str, Any] = {}
 
         # 动作预置（近似动作，可按现场再调）
         self.left_extend_eef = [0.45, 0.30, 0.82, 0.0, 0.0, 0.0]
@@ -116,6 +127,21 @@ class RobotControlService:
             "cmd_port": self.cmd_port,
             "state_port": self.state_port,
             "mode_port": self.mode_port,
+            "chassis": {
+                "ip": self.chassis_ip,
+                "cmd_port": self.chassis_cmd_port,
+                "cmd_timeout_s": self.chassis_cmd_timeout_s,
+            },
+            "motion_checks": {
+                "mode_settle_s": self.mode_settle_s,
+                "auto_prepare": self.motion_auto_prepare,
+                "verify_feedback": self.motion_verify_feedback,
+                "feedback_timeout_s": self.motion_feedback_timeout_s,
+                "feedback_min_v": self.motion_feedback_min_v,
+                "strict": self.motion_strict,
+                "prepared": self._motion_prepared,
+                "last_diag": self._last_motion_diag,
+            },
             "config_root": str(self.config_root),
             "camera": {
                 "head": bool(self.head_camera_url),
@@ -135,13 +161,82 @@ class RobotControlService:
                 ip=self.robot_ip,
                 port=self.cmd_port,
                 state_port=self.state_port,
-                chassis_tcp_on_send=False,
+                chassis_tcp_on_send=True,
                 auto_state_thread=True,
+            )
+            # Ensure base motion uses the chassis TCP endpoint expected by the SDK tests.
+            self._sdk.configure_chassis_tcp(
+                ip=self.chassis_ip,
+                port=self.chassis_cmd_port,
+                timeout_s=self.chassis_cmd_timeout_s,
             )
 
         if self._mode is None:
             RobotModeManager = self._sdk_api["RobotModeManager"]
             self._mode = RobotModeManager(ip=self.robot_ip, port=self.mode_port)
+
+    def _prepare_motion_mode_if_needed(self) -> None:
+        if not self.motion_auto_prepare:
+            return
+        if self._motion_prepared:
+            return
+        self._mode.robot_enable_up()
+        if self.mode_settle_s > 0:
+            time.sleep(self.mode_settle_s)
+        self._mode.robot_autonomous_mode()
+        if self.mode_settle_s > 0:
+            time.sleep(min(self.mode_settle_s, 1.0))
+        self._motion_prepared = True
+
+    def _sample_base_status(self, timeout_s: float = 0.05) -> tuple[float, float] | None:
+        try:
+            self._sdk.fetch_robot_state(timeout=float(timeout_s))
+            return float(self._sdk.ctrl.car_translation_status), float(self._sdk.ctrl.car_rotation_status)
+        except Exception:
+            return None
+
+    def _verify_motion_feedback(self, expect_vx: float, expect_w: float) -> dict[str, Any]:
+        if not self.motion_verify_feedback or (abs(expect_vx) < 1e-6 and abs(expect_w) < 1e-6):
+            diag = {"verified": False, "reason": "feedback_check_disabled_or_zero_target"}
+            self._last_motion_diag = diag
+            return diag
+
+        deadline = time.time() + self.motion_feedback_timeout_s
+        max_abs_vx = 0.0
+        max_abs_w = 0.0
+        samples = 0
+        while time.time() < deadline:
+            st = self._sample_base_status(timeout_s=0.05)
+            if st is not None:
+                samples += 1
+                vx, w = st
+                max_abs_vx = max(max_abs_vx, abs(vx))
+                max_abs_w = max(max_abs_w, abs(w))
+                if abs(expect_vx) > 1e-6 and max_abs_vx >= self.motion_feedback_min_v:
+                    break
+                if abs(expect_w) > 1e-6 and max_abs_w >= self.motion_feedback_min_v:
+                    break
+            time.sleep(0.03)
+
+        moved = False
+        if abs(expect_vx) > 1e-6 and max_abs_vx >= self.motion_feedback_min_v:
+            moved = True
+        if abs(expect_w) > 1e-6 and max_abs_w >= self.motion_feedback_min_v:
+            moved = True
+
+        diag = {
+            "verified": True,
+            "moved": moved,
+            "samples": samples,
+            "max_abs_vx": round(max_abs_vx, 4),
+            "max_abs_w": round(max_abs_w, 4),
+            "threshold": self.motion_feedback_min_v,
+            "timeout_s": self.motion_feedback_timeout_s,
+        }
+        self._last_motion_diag = diag
+        if not moved and self.motion_strict:
+            raise RuntimeError(f"底盘未检测到实际速度反馈，diag={diag}")
+        return diag
 
     def _current_targets(self) -> tuple[list[float], list[float], list[float], list[float], list[float], float, float]:
         sdk = self._sdk
@@ -158,11 +253,13 @@ class RobotControlService:
             self._mode.robot_enable_up()
             self._mode.robot_autonomous_mode()
             self._sdk.reset_to_init(send_time=2.5, mode="eef", interp_start="ctrl")
+            self._motion_prepared = True
             return {"ok": True, "message": "机器人初始化完成（已上使能 + 自主模式 + reset_to_init）"}
 
     def move_distance(self, distance_m: float, speed_mps: float = 0.15) -> dict[str, Any]:
         with self._lock:
             self._ensure_clients()
+            self._prepare_motion_mode_if_needed()
             dist = float(distance_m)
             speed = max(0.03, min(abs(float(speed_mps)), 0.5))
             duration = abs(dist) / speed if speed > 1e-6 else 0.0
@@ -177,11 +274,19 @@ class RobotControlService:
 
             self._sdk.set_base_vel(0.0, 0.0)
             self._sdk.send()
-            return {"ok": True, "distance_m": dist, "speed_mps": speed, "duration_s": round(duration, 3)}
+            motion_diag = self._verify_motion_feedback(expect_vx=vx, expect_w=0.0)
+            return {
+                "ok": True,
+                "distance_m": dist,
+                "speed_mps": speed,
+                "duration_s": round(duration, 3),
+                "motion_diag": motion_diag,
+            }
 
     def turn_angle(self, angle_deg: float, angular_speed_dps: float = 25.0) -> dict[str, Any]:
         with self._lock:
             self._ensure_clients()
+            self._prepare_motion_mode_if_needed()
             deg = float(angle_deg)
             w_deg = max(5.0, min(abs(float(angular_speed_dps)), 120.0))
             duration = abs(deg) / w_deg if w_deg > 1e-6 else 0.0
@@ -196,7 +301,14 @@ class RobotControlService:
 
             self._sdk.set_base_vel(0.0, 0.0)
             self._sdk.send()
-            return {"ok": True, "angle_deg": deg, "angular_speed_dps": w_deg, "duration_s": round(duration, 3)}
+            motion_diag = self._verify_motion_feedback(expect_vx=0.0, expect_w=w)
+            return {
+                "ok": True,
+                "angle_deg": deg,
+                "angular_speed_dps": w_deg,
+                "duration_s": round(duration, 3),
+                "motion_diag": motion_diag,
+            }
 
     def gripper(self, action: str, side: str = "both") -> dict[str, Any]:
         with self._lock:
