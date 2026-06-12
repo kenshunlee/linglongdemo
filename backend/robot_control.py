@@ -23,6 +23,24 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 
+try:
+    import cv2  # type: ignore[import-not-found]
+    import numpy as np  # type: ignore[import-not-found]
+except Exception:
+    cv2 = None
+    np = None
+
+try:
+    import rclpy  # type: ignore[import-not-found]
+    from rclpy.node import Node  # type: ignore[import-not-found]
+    from rclpy.qos import QoSPresetProfiles  # type: ignore[import-not-found]
+    from sensor_msgs.msg import CompressedImage  # type: ignore[import-not-found]
+except Exception:
+    rclpy = None
+    Node = object
+    QoSPresetProfiles = None
+    CompressedImage = object
+
 
 def _as_bool(v: str | None, default: bool = False) -> bool:
     if v is None:
@@ -35,6 +53,169 @@ def _parse_float(v: Any, default: float) -> float:
         return float(v)
     except Exception:
         return default
+
+
+class _Ros2CameraBridge:
+    def __init__(self, *, topics: dict[str, str], record_dir: Path, record_fps: float = 12.0, enabled: bool = True) -> None:
+        self.enabled = enabled
+        self.topics = topics
+        self.record_dir = record_dir
+        self.record_fps = max(1.0, float(record_fps))
+
+        self._lock = threading.RLock()
+        self._latest_jpeg: dict[str, bytes] = {}
+        self._latest_ts: dict[str, float] = {}
+        self._recording_files: dict[str, str] = {}
+        self._recording_frames: dict[str, int] = {}
+        self._writers: dict[str, Any] = {}
+        self._sizes: dict[str, tuple[int, int]] = {}
+        self._error = ""
+
+        self._rclpy_started = False
+        self._node = None
+        self._spin_thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if not self.enabled:
+            self._error = "CAMERA_ROS2_ENABLED=0"
+            return
+        if rclpy is None or QoSPresetProfiles is None or cv2 is None or np is None:
+            self._error = "缺少 ROS2/cv2 依赖（需要 rclpy、sensor_msgs、opencv-python、numpy）"
+            return
+
+        try:
+            self.record_dir.mkdir(parents=True, exist_ok=True)
+            rclpy.init(args=None)
+            self._rclpy_started = True
+
+            node = rclpy.create_node("team66_camera_bridge")
+            qos = QoSPresetProfiles.SENSOR_DATA.value
+
+            for camera_name, topic in self.topics.items():
+                cam = camera_name
+                node.create_subscription(
+                    CompressedImage,
+                    topic,
+                    lambda msg, _cam=cam: self._on_image(_cam, msg),
+                    qos,
+                )
+
+            self._node = node
+            self._spin_thread = threading.Thread(target=self._spin_forever, name="ros2-camera-bridge", daemon=True)
+            self._spin_thread.start()
+            self._error = ""
+        except Exception as exc:
+            self._error = f"ROS2 相机桥启动失败: {exc}"
+            self.stop()
+
+    def _spin_forever(self) -> None:
+        if self._node is None or rclpy is None:
+            return
+        try:
+            rclpy.spin(self._node)
+        except Exception as exc:
+            with self._lock:
+                self._error = f"ROS2 spin 异常: {exc}"
+
+    def _on_image(self, camera_name: str, msg: Any) -> None:
+        data = bytes(msg.data)
+        now_ts = time.time()
+        with self._lock:
+            self._latest_jpeg[camera_name] = data
+            self._latest_ts[camera_name] = now_ts
+        self._record_frame(camera_name, data)
+
+    def _record_frame(self, camera_name: str, jpeg: bytes) -> None:
+        if cv2 is None or np is None:
+            return
+
+        frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            return
+
+        h, w = frame.shape[:2]
+        writer = self._writers.get(camera_name)
+
+        if writer is None:
+            ts = time.strftime("%Y%m%d%H%M%S")
+            file_path = self.record_dir / f"camera_{camera_name}_{ts}.avi"
+            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+            writer = cv2.VideoWriter(str(file_path), fourcc, self.record_fps, (w, h))
+            if not writer.isOpened():
+                self._error = f"视频写入器打开失败: {file_path}"
+                return
+            self._writers[camera_name] = writer
+            self._sizes[camera_name] = (w, h)
+            self._recording_files[camera_name] = str(file_path)
+            self._recording_frames[camera_name] = 0
+
+        expected = self._sizes.get(camera_name, (w, h))
+        if (w, h) != expected:
+            frame = cv2.resize(frame, expected)
+
+        writer.write(frame)
+        self._recording_frames[camera_name] = int(self._recording_frames.get(camera_name, 0)) + 1
+
+    def get_latest_frame(self, camera_name: str) -> bytes | None:
+        with self._lock:
+            return self._latest_jpeg.get(camera_name)
+
+    def camera_status(self, camera_name: str) -> dict[str, Any]:
+        with self._lock:
+            latest = self._latest_ts.get(camera_name)
+            return {
+                "topic": self.topics.get(camera_name, ""),
+                "has_frame": camera_name in self._latest_jpeg,
+                "last_frame_ts": latest,
+                "last_frame_iso": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(latest)) if latest else "",
+                "recording_file": self._recording_files.get(camera_name, ""),
+                "recording_frames": int(self._recording_frames.get(camera_name, 0)),
+            }
+
+    def save_snapshots(self, output_dir: Path, *, prefix: str = "SESSION-END") -> dict[str, str]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        saved: dict[str, str] = {}
+        with self._lock:
+            for camera_name, jpeg in self._latest_jpeg.items():
+                if not jpeg:
+                    continue
+                ts = time.strftime("%Y%m%d_%H%M%S")
+                file_path = output_dir / f"{prefix}_{camera_name}_{ts}.jpg"
+                file_path.write_bytes(jpeg)
+                saved[camera_name] = str(file_path)
+        return saved
+
+    def health(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "enabled": self.enabled,
+                "running": bool(self._spin_thread and self._spin_thread.is_alive()),
+                "topics": dict(self.topics),
+                "record_dir": str(self.record_dir),
+                "error": self._error,
+            }
+
+    def stop(self) -> None:
+        for writer in self._writers.values():
+            try:
+                writer.release()
+            except Exception:
+                pass
+        self._writers.clear()
+
+        if self._node is not None:
+            try:
+                self._node.destroy_node()
+            except Exception:
+                pass
+            self._node = None
+
+        if self._rclpy_started and rclpy is not None:
+            try:
+                rclpy.shutdown()
+            except Exception:
+                pass
+        self._rclpy_started = False
 
 
 class RobotControlService:
@@ -68,6 +249,32 @@ class RobotControlService:
         self.head_camera_url = os.getenv("HEAD_CAMERA_URL", "")
         self.left_camera_url = os.getenv("LEFT_HAND_CAMERA_URL", "")
         self.right_camera_url = os.getenv("RIGHT_HAND_CAMERA_URL", "")
+        self.camera_ros2_enabled = _as_bool(os.getenv("CAMERA_ROS2_ENABLED", "1"), True)
+        self.camera_topics = {
+            "head": os.getenv("HEAD_CAMERA_TOPIC", "/camera/head/image_raw/compressed"),
+            "left": os.getenv("LEFT_CAMERA_TOPIC", "/camera/left/image_raw/compressed"),
+            "right": os.getenv("RIGHT_CAMERA_TOPIC", "/camera/right/image_raw/compressed"),
+        }
+        self.camera_record_fps = _parse_float(os.getenv("CAMERA_RECORD_FPS", "12"), 12.0)
+        self.camera_record_dir = Path(
+            os.getenv(
+                "CAMERA_RECORD_DIR",
+                str(Path(__file__).resolve().parents[2] / "output" / "camera"),
+            )
+        )
+        self.reflow_media_dir = Path(
+            os.getenv(
+                "REFLOW_MEDIA_DIR",
+                str(Path(__file__).resolve().parents[2] / "output" / "reflow_buffer"),
+            )
+        )
+        self._ros2_camera_bridge = _Ros2CameraBridge(
+            topics=self.camera_topics,
+            record_dir=self.camera_record_dir,
+            record_fps=self.camera_record_fps,
+            enabled=self.camera_ros2_enabled,
+        )
+        self._ros2_camera_bridge.start()
 
         self._lock = threading.RLock()
         self._sdk = None
@@ -150,9 +357,17 @@ class RobotControlService:
             },
             "config_root": str(self.config_root),
             "camera": {
-                "head": bool(self.head_camera_url),
-                "left": bool(self.left_camera_url),
-                "right": bool(self.right_camera_url),
+                "head": self._ros2_camera_bridge.camera_status("head"),
+                "left": self._ros2_camera_bridge.camera_status("left"),
+                "right": self._ros2_camera_bridge.camera_status("right"),
+                "ros2": self._ros2_camera_bridge.health(),
+                "record_dir": str(self.camera_record_dir),
+                "reflow_media_dir": str(self.reflow_media_dir),
+                "http_fallback": {
+                    "head": bool(self.head_camera_url),
+                    "left": bool(self.left_camera_url),
+                    "right": bool(self.right_camera_url),
+                },
             },
             "last_error": self._last_error,
         }
@@ -670,9 +885,17 @@ class RobotControlService:
         return ""
 
     def fetch_camera_frame(self, camera_name: str) -> tuple[bytes, str]:
+        cam = camera_name.strip().lower()
+        if cam not in {"head", "left", "right"}:
+            raise RuntimeError(f"未知相机名: {camera_name}")
+
+        frame = self._ros2_camera_bridge.get_latest_frame(cam)
+        if frame:
+            return frame, "image/jpeg"
+
         url = self._camera_url(camera_name)
         if not url:
-            raise RuntimeError(f"相机 {camera_name} 未配置 URL")
+            raise RuntimeError(f"相机 {camera_name} 尚未收到 ROS2 帧，且未配置 HTTP 回退 URL")
 
         timeout = httpx.Timeout(4.0, connect=2.0)
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
@@ -684,6 +907,10 @@ class RobotControlService:
             if "png" in ctype:
                 return bytes(res.content), "image/png"
             raise RuntimeError(f"相机 URL 未返回图片格式: {ctype}")
+
+    def save_reflow_snapshots(self, session_id: str, *, prefix: str = "SESSION-END") -> dict[str, str]:
+        session_dir = self.reflow_media_dir / session_id / "media"
+        return self._ros2_camera_bridge.save_snapshots(session_dir, prefix=prefix)
 
 
 robot_service = RobotControlService()

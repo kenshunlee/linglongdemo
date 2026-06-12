@@ -26,6 +26,21 @@ Page({
     taskList: [],
     taskIndex: 0,
 
+    reflowState: null,
+    missionStatus: null,
+    cameraHealth: null,
+    reflowCoordSys: 'slam_local',
+    reflowTaskId: '',
+    reflowSessionId: '',
+    reflowTeamId: '',
+    reflowRobotId: '',
+    reflowSceneId: '',
+    missionState: 'IDLE',
+    missionRunning: false,
+    ros2Running: false,
+    cameraRecordDir: '',
+    reflowMediaDir: '',
+
     camera: 'head',
     cameraPreviewOn: false,
     cameraSrc: '',
@@ -83,11 +98,29 @@ Page({
 
   async refreshHealth() {
     try {
-      const data = await this.req('/robot/health', 'GET');
-      const d = data?.data || {};
+      const [serviceData, robotData] = await Promise.all([
+        this.req('/health', 'GET'),
+        this.req('/robot/health', 'GET'),
+      ]);
+      const service = serviceData?.data || {};
+      const robot = robotData?.data || {};
       this.setData({
-        robotReady: !!d.sdk_ready,
-        sdkReason: d.sdk_reason || '',
+        robotReady: !!robot.sdk_ready,
+        sdkReason: robot.sdk_reason || '',
+        reflowState: service?.reflow?.state || null,
+        missionStatus: service?.mission || null,
+        cameraHealth: robot?.camera || null,
+        reflowCoordSys: service?.reflow?.state?.coord_sys || 'slam_local',
+        reflowTaskId: service?.reflow?.state?.task_id || '',
+        reflowSessionId: service?.reflow?.state?.session_id || '',
+        reflowTeamId: service?.reflow?.state?.team_id || '',
+        reflowRobotId: service?.reflow?.state?.robot_id || '',
+        reflowSceneId: service?.reflow?.state?.scene_id || '',
+        missionState: service?.mission?.state || 'IDLE',
+        missionRunning: !!service?.mission?.running,
+        ros2Running: !!robot?.camera?.ros2?.running,
+        cameraRecordDir: robot?.camera?.record_dir || '',
+        reflowMediaDir: robot?.camera?.reflow_media_dir || '',
       });
     } catch (e) {
       this.setData({ robotReady: false, sdkReason: `健康检查失败: ${e.message}` });
@@ -216,7 +249,7 @@ Page({
     };
 
     tick();
-    const timer = setInterval(tick, 700);
+    const timer = setInterval(tick, 220);
     this.setData({ cameraTimer: timer });
   },
 
@@ -237,6 +270,6 @@ Page({
   },
 
   onCameraError() {
-    this.setData({ cameraError: '相机画面拉取失败，请检查后端环境变量中的相机 URL 配置' });
+    this.setData({ cameraError: '相机画面拉取失败，请检查后端 ROS2 话题订阅与网络，或配置 HTTP 回退相机 URL' });
   },
 });

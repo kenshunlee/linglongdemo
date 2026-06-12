@@ -155,6 +155,7 @@ REFLOW_STATE: dict[str, Any] = {
 MISSION_REFLOW_BRIDGE = MissionReflowBridge(
     client=REFLOW_CLIENT,
     enabled=bool(REFLOW_ENABLED and MISSION_AUTO_REFLOW),
+    robot_service=robot_service,
     team_id=REFLOW_TEAM_ID,
     robot_id=REFLOW_ROBOT_ID,
     scene_id=REFLOW_SCENE_ID,
@@ -545,6 +546,21 @@ class ASRHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/reflow/session/current":
             self._send_json(200, {"success": True, "data": REFLOW_STATE})
+            return
+
+        if parsed.path == "/reflow/status":
+            self._send_json(
+                200,
+                {
+                    "success": True,
+                    "data": {
+                        "state": REFLOW_STATE,
+                        "mission": MISSION_CONTROLLER.status(),
+                        "robot": robot_service.health(),
+                        "client": REFLOW_CLIENT.health(),
+                    },
+                },
+            )
             return
 
         if parsed.path == "/reflow/session/status":

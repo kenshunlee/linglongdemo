@@ -9,6 +9,15 @@
   </view>
 
   <view class="card">
+    <text class="title">回流状态</text>
+    <text class="hint">坐标系：{{reflowCoordSys}} / 任务：{{reflowTaskId || '未创建'}} / 会话：{{reflowSessionId || '未创建'}}</text>
+    <text class="hint">队伍：{{reflowTeamId || 'N/A'}} / 机器人：{{reflowRobotId || 'N/A'}} / 场景：{{reflowSceneId || 'N/A'}}</text>
+    <text class="hint">任务状态：{{missionState}} / running={{missionRunning ? 'true' : 'false'}}</text>
+    <text class="hint">ROS2：{{ros2Running ? '已启动' : '未启动'}}，录制目录：{{cameraRecordDir || 'N/A'}}</text>
+    <text class="hint">媒体目录：{{reflowMediaDir || 'N/A'}}</text>
+  </view>
+
+  <view class="card">
     <text class="title">1. 初始化</text>
     <button class="btn btn-main" bindtap="onInitRobot" loading="{{busy}}"><text class="btn-icon">◆</text><text class="btn-label">上电初始化</text></button>
     <view class="input-row">
@@ -69,7 +78,7 @@
   </view>
 
   <view class="card">
-    <text class="title">10/11/12. 相机实时画面（轮询近实时）</text>
+    <text class="title">10/11/12. 相机实时画面（ROS2压缩图）</text>
     <view class="chip-row">
       <view class="chip {{camera==='head' ? 'chip-on' : ''}}" data-camera="head" bindtap="onSelectCamera">头部相机</view>
       <view class="chip {{camera==='left' ? 'chip-on' : ''}}" data-camera="left" bindtap="onSelectCamera">左手相机</view>
@@ -77,6 +86,7 @@
     </view>
     <button class="btn btn-ghost" bindtap="onTogglePreview"><text class="btn-icon">{{cameraPreviewOn ? '■' : '▷'}}</text><text class="btn-label">{{cameraPreviewOn ? '停止预览' : '开始预览'}}</text></button>
     <image wx:if="{{cameraSrc}}" mode="widthFix" src="{{cameraSrc}}" binderror="onCameraError" />
+    <text class="hint">后端会自动分别录制头部/左手/右手相机视频到 output/camera 目录。</text>
     <text class="hint" wx:if="{{cameraError}}">{{cameraError}}</text>
   </view>
 
