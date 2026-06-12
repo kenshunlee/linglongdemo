@@ -276,7 +276,7 @@ Page({
       sampleRate: 16000,
       numberOfChannels: 1,
       encodeBitRate: 96000,
-      format: 'aac',           // iOS/Android 均支持
+      format: 'mp3',           // 输出 MP3，便于智谱语音模型处理
     });
   },
 
@@ -343,7 +343,7 @@ Page({
   // ─────── 上传与转写 ───────
   _uploadAudio(filePath, duration, originalName) {
     const base = this.data.requestBase || this._buildRequestBase(this.data.serverBase);
-    const fileName = originalName || `record_${Date.now()}.aac`;
+    const fileName = originalName || `record_${Date.now()}.mp3`;
 
     this.setData({
       isProcessing: true,

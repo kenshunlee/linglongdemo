@@ -44,7 +44,7 @@
     "disableSWC": true
   },
   "compileType": "miniprogram",
-  "libVersion": "3.3.4",
+  "libVersion": "3.16.1",
   "appid": "wx84280c27da92b5a2",
   "projectname": "asr-miniprogram",
   "isGameTourist": false,

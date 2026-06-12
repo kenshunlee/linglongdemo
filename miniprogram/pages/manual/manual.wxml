@@ -11,6 +11,11 @@
   <view class="card">
     <text class="title">1. 初始化</text>
     <button class="btn btn-main" bindtap="onInitRobot" loading="{{busy}}"><text class="btn-icon">◆</text><text class="btn-label">上电初始化</text></button>
+    <view class="input-row">
+      <text>音量(0-100)</text>
+      <input type="number" value="{{volumePercent}}" bindinput="onVolumeInput" />
+    </view>
+    <button class="btn" bindtap="onSetVolume" loading="{{busy}}"><text class="btn-icon">♪</text><text class="btn-label">设置音量</text></button>
   </view>
 
   <view class="card">
@@ -18,6 +23,10 @@
     <view class="input-row">
       <text>距离(米)</text>
       <input type="digit" value="{{moveDistance}}" bindinput="onMoveInput" />
+    </view>
+    <view class="input-row">
+      <text>速度(米/秒)</text>
+      <input type="digit" value="{{moveSpeed}}" bindinput="onMoveSpeedInput" />
     </view>
     <view class="btn-grid">
       <button class="btn" bindtap="onForward" loading="{{busy}}"><text class="btn-icon">▲</text><text class="btn-label">前进</text></button>

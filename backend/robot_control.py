@@ -55,6 +55,7 @@ class RobotControlService:
         self.motion_feedback_timeout_s = max(0.05, _parse_float(os.getenv("ROBOT_MOTION_FEEDBACK_TIMEOUT_S", "0.6"), 0.6))
         self.motion_feedback_min_v = max(0.001, _parse_float(os.getenv("ROBOT_MOTION_FEEDBACK_MIN_V", "0.01"), 0.01))
         self.motion_strict = _as_bool(os.getenv("ROBOT_MOTION_STRICT", "0"), False)
+        self.volume_percent = max(0, min(100, int(_parse_float(os.getenv("ROBOT_VOLUME_PERCENT", "70"), 70))))
 
         # 任务目录：默认优先使用 SDK 文档目录下 config
         self.config_root = Path(
@@ -143,6 +144,9 @@ class RobotControlService:
                 "prepared": self._motion_prepared,
                 "last_diag": self._last_motion_diag,
                 "last_action_result": self._last_action_result,
+            },
+            "audio": {
+                "volume_percent": self.volume_percent,
             },
             "config_root": str(self.config_root),
             "camera": {
@@ -383,6 +387,47 @@ class RobotControlService:
             result = {
                 "ok": True,
                 "message": "机器人初始化完成（已上使能 + 自主模式 + reset_to_init）",
+                **self._build_action_result(ok=True),
+            }
+            self._remember_action_result(result)
+            return result
+
+    def set_volume(self, volume_percent: float) -> dict[str, Any]:
+        with self._lock:
+            self._ensure_clients()
+            volume = max(0, min(100, int(round(float(volume_percent)))))
+            self.volume_percent = volume
+
+            # Try common SDK methods if available; keep API usable even if SDK lacks volume control.
+            sdk_method_candidates = [
+                "set_volume",
+                "set_speaker_volume",
+                "set_audio_volume",
+                "set_tts_volume",
+            ]
+            applied_by = "local_cache"
+            applied = False
+            for name in sdk_method_candidates:
+                fn = getattr(self._sdk, name, None)
+                if not callable(fn):
+                    continue
+                try:
+                    # Most SDKs accept either 0-100 or 0.0-1.0.
+                    try:
+                        fn(volume)
+                    except TypeError:
+                        fn(volume / 100.0)
+                    applied_by = f"sdk.{name}"
+                    applied = True
+                    break
+                except Exception:
+                    continue
+
+            result = {
+                "ok": True,
+                "volume_percent": volume,
+                "applied": applied,
+                "applied_by": applied_by,
                 **self._build_action_result(ok=True),
             }
             self._remember_action_result(result)
@@ -703,6 +748,11 @@ def handle_robot_post(path: str, body: dict[str, Any]) -> tuple[int, dict[str, A
         if path == "/robot/trajectory/play":
             task_name = str(body.get("task_name", "")).strip()
             data = robot_service.playback_trajectory(task_name)
+            return 200, {"success": True, "data": data}, "application/json; charset=utf-8"
+
+        if path == "/robot/volume":
+            volume_percent = _parse_float(body.get("volume_percent"), robot_service.volume_percent)
+            data = robot_service.set_volume(volume_percent=volume_percent)
             return 200, {"success": True, "data": data}, "application/json; charset=utf-8"
 
         return 404, {"detail": "Not Found"}, "application/json; charset=utf-8"

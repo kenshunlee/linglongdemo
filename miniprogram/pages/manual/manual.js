@@ -1,6 +1,15 @@
 const app = getApp();
 const config = require('../../config');
 
+function toFloat(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 Page({
   data: {
     serverBase: '',
@@ -9,7 +18,9 @@ Page({
     busy: false,
     lastMsg: '',
 
-    moveDistance: 0.3,
+    moveDistance: '0.3',
+    moveSpeed: '0.15',
+    volumePercent: '70',
     turnAngle: 30,
 
     taskList: [],
@@ -94,11 +105,19 @@ Page({
   },
 
   onMoveInput(e) {
-    this.setData({ moveDistance: Number(e.detail.value || 0) });
+    this.setData({ moveDistance: e.detail.value });
+  },
+
+  onMoveSpeedInput(e) {
+    this.setData({ moveSpeed: e.detail.value });
   },
 
   onTurnInput(e) {
     this.setData({ turnAngle: Number(e.detail.value || 0) });
+  },
+
+  onVolumeInput(e) {
+    this.setData({ volumePercent: e.detail.value });
   },
 
   onTaskChange(e) {
@@ -109,14 +128,21 @@ Page({
     this.runAction('初始化', () => this.req('/robot/init', 'POST', {}));
   },
 
+  onSetVolume() {
+    const volume = clamp(toFloat(this.data.volumePercent, 70), 0, 100);
+    this.runAction('设置音量', () => this.req('/robot/volume', 'POST', { volume_percent: volume }));
+  },
+
   onForward() {
-    const d = Math.abs(Number(this.data.moveDistance || 0.2));
-    this.runAction('前进', () => this.req('/robot/move', 'POST', { distance_m: d }));
+    const d = Math.abs(toFloat(this.data.moveDistance, 0.2));
+    const speed = clamp(Math.abs(toFloat(this.data.moveSpeed, 0.15)), 0.03, 0.5);
+    this.runAction('前进', () => this.req('/robot/move', 'POST', { distance_m: d, speed_mps: speed }));
   },
 
   onBackward() {
-    const d = -Math.abs(Number(this.data.moveDistance || 0.2));
-    this.runAction('后退', () => this.req('/robot/move', 'POST', { distance_m: d }));
+    const d = -Math.abs(toFloat(this.data.moveDistance, 0.2));
+    const speed = clamp(Math.abs(toFloat(this.data.moveSpeed, 0.15)), 0.03, 0.5);
+    this.runAction('后退', () => this.req('/robot/move', 'POST', { distance_m: d, speed_mps: speed }));
   },
 
   onTurnLeft() {
