@@ -101,6 +101,31 @@
   gap: 12rpx;
 }
 
+.nudge-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10rpx;
+  margin-top: 10rpx;
+}
+
+.nudge-grid .btn {
+  margin-top: 0;
+  padding: 0;
+  min-height: 68rpx;
+  font-size: 24rpx;
+}
+
+.nudge-grid .btn.btn-hold-active {
+  background: #0f6ea8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 0 2rpx rgba(15, 110, 168, 0.3) inset;
+}
+
+.btn-stop {
+  background: #c94b2a !important;
+  color: #ffffff !important;
+}
+
 .input-row {
   display: flex;
   align-items: center;

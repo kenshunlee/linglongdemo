@@ -1,5 +1,5 @@
 const SERVER_PORT = '8765';
-const DEFAULT_SERVER_HOST = '192.168.1.132';   //'172.18.1.79';
+const DEFAULT_SERVER_HOST = '172.18.1.79';  //'192.168.1.132';   //
 const DEFAULT_SERVER_BASE = `http://${DEFAULT_SERVER_HOST}:${SERVER_PORT}`;
 
 function normalizeServerBase(value) {

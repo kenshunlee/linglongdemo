@@ -46,6 +46,20 @@ Page({
     cameraSrc: '',
     cameraError: '',
     cameraTimer: null,
+
+    eefArm: 'left',
+    eefSendTime: '0.45',
+    eefX: '',
+    eefY: '',
+    eefZ: '',
+    eefRollDeg: '',
+    eefPitchDeg: '',
+    eefYawDeg: '',
+    eefActualText: '',
+    eefStepPos: '0.02',
+    eefStepAttDeg: '5',
+    eefHoldActive: false,
+    eefHoldKey: '',
   },
 
   onLoad() {
@@ -53,10 +67,21 @@ Page({
     this.setData({ serverBase: base });
     this.refreshHealth();
     this.loadTasks();
+    this.refreshEefCurrent();
+
+    this._eefHoldActive = false;
+    this._eefHoldPressing = false;
+    this._eefHoldStartTimer = null;
+    this._eefPendingNudge = null;
   },
 
   onUnload() {
     this.stopCameraPreview();
+    this.stopEefHoldNudge();
+  },
+
+  sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   },
 
   req(path, method = 'GET', data = null) {
@@ -137,6 +162,41 @@ Page({
     }
   },
 
+  radToDeg(v) {
+    return (Number(v || 0) * 180.0) / Math.PI;
+  },
+
+  degToRad(v) {
+    return (Number(v || 0) * Math.PI) / 180.0;
+  },
+
+  async refreshEefCurrent() {
+    const arm = this.data.eefArm || 'left';
+    try {
+      const data = await this.req(`/robot/arm/eef/current?arm=${arm}`, 'GET');
+      const d = data?.data || {};
+      const target = d?.target_pose || [];
+      const actual = d?.actual_pose || [];
+      if (target.length >= 6) {
+        this.setData({
+          eefX: String(target[0].toFixed(3)),
+          eefY: String(target[1].toFixed(3)),
+          eefZ: String(target[2].toFixed(3)),
+          eefRollDeg: String(this.radToDeg(target[3]).toFixed(1)),
+          eefPitchDeg: String(this.radToDeg(target[4]).toFixed(1)),
+          eefYawDeg: String(this.radToDeg(target[5]).toFixed(1)),
+        });
+      }
+      if (actual.length >= 6) {
+        this.setData({
+          eefActualText: `实际: x=${actual[0].toFixed(3)}, y=${actual[1].toFixed(3)}, z=${actual[2].toFixed(3)}, rpy=(${this.radToDeg(actual[3]).toFixed(1)}, ${this.radToDeg(actual[4]).toFixed(1)}, ${this.radToDeg(actual[5]).toFixed(1)})°`,
+        });
+      }
+    } catch (_e) {
+      // Ignore transient read failures to keep manual page responsive.
+    }
+  },
+
   onMoveInput(e) {
     this.setData({ moveDistance: e.detail.value });
   },
@@ -151,6 +211,219 @@ Page({
 
   onVolumeInput(e) {
     this.setData({ volumePercent: e.detail.value });
+  },
+
+  onEefArmChange(e) {
+    const arm = e.currentTarget.dataset.arm;
+    if (!arm) return;
+    this.setData({ eefArm: arm }, () => this.refreshEefCurrent());
+  },
+
+  onEefInput(e) {
+    const key = e.currentTarget.dataset.key;
+    if (!key) return;
+    this.setData({ [key]: e.detail.value });
+  },
+
+  buildEefAbsolutePose() {
+    const x = toFloat(this.data.eefX, 0.0);
+    const y = toFloat(this.data.eefY, 0.0);
+    const z = toFloat(this.data.eefZ, 0.0);
+    const roll = this.degToRad(toFloat(this.data.eefRollDeg, 0.0));
+    const pitch = this.degToRad(toFloat(this.data.eefPitchDeg, 0.0));
+    const yaw = this.degToRad(toFloat(this.data.eefYawDeg, 0.0));
+    return [x, y, z, roll, pitch, yaw];
+  },
+
+  onApplyEefAbsolute() {
+    const arm = this.data.eefArm || 'left';
+    const sendTime = clamp(toFloat(this.data.eefSendTime, 0.45), 0.1, 2.5);
+    const pose = this.buildEefAbsolutePose();
+    this.runAction('末端绝对位姿', async () => {
+      const resp = await this.req('/robot/arm/eef_adjust', 'POST', {
+        arm,
+        mode: 'absolute',
+        pose,
+        send_time_s: sendTime,
+      });
+      this.refreshEefCurrent();
+      return resp;
+    });
+  },
+
+  onApplyEefDelta() {
+    const arm = this.data.eefArm || 'left';
+    const sendTime = clamp(toFloat(this.data.eefSendTime, 0.45), 0.1, 2.5);
+    const pose = this.buildEefAbsolutePose();
+    this.runAction('末端增量位姿', async () => {
+      const resp = await this.req('/robot/arm/eef_adjust', 'POST', {
+        arm,
+        mode: 'delta',
+        pose,
+        send_time_s: sendTime,
+      });
+      this.refreshEefCurrent();
+      return resp;
+    });
+  },
+
+  async sendEefDeltaStep(axis, sign, silent = false) {
+    if (this.data.busy) return null;
+
+    const arm = this.data.eefArm || 'left';
+    const sendTime = clamp(toFloat(this.data.eefSendTime, 0.35), 0.1, 2.5);
+    const stepPos = clamp(Math.abs(toFloat(this.data.eefStepPos, 0.02)), 0.001, 0.08);
+    const stepAtt = this.degToRad(clamp(Math.abs(toFloat(this.data.eefStepAttDeg, 5)), 0.1, 20));
+    const pose = [0, 0, 0, 0, 0, 0];
+
+    if (axis === 'x') pose[0] = sign * stepPos;
+    else if (axis === 'y') pose[1] = sign * stepPos;
+    else if (axis === 'z') pose[2] = sign * stepPos;
+    else if (axis === 'r') pose[3] = sign * stepAtt;
+    else if (axis === 'p') pose[4] = sign * stepAtt;
+    else if (axis === 'yaw') pose[5] = sign * stepAtt;
+    else return null;
+
+    this.setData({ busy: true, lastMsg: silent ? '末端连续微调中...' : '末端步进微调执行中...' });
+    try {
+      const resp = await this.req('/robot/arm/eef_adjust', 'POST', {
+        arm,
+        mode: 'delta',
+        pose,
+        send_time_s: sendTime,
+      });
+      const msg = resp?.data?.message || resp?.detail || '末端步进已执行';
+      this.setData({ lastMsg: msg });
+      if (!silent) {
+        wx.showToast({ title: '操作成功', icon: 'success' });
+      }
+      return resp;
+    } catch (e) {
+      const msg = `末端步进失败: ${e.message}`;
+      this.setData({ lastMsg: msg });
+      if (!silent) {
+        wx.showToast({ title: '操作失败', icon: 'none' });
+      }
+      throw e;
+    } finally {
+      this.setData({ busy: false });
+    }
+  },
+
+  onEefNudge(e) {
+    const axis = String(e.currentTarget.dataset.axis || '').toLowerCase();
+    const sign = Number(e.currentTarget.dataset.sign || 1) >= 0 ? 1 : -1;
+    this.sendEefDeltaStep(axis, sign).then(() => this.refreshEefCurrent());
+  },
+
+  async runEefHoldLoop() {
+    while (this._eefHoldActive) {
+      const cfg = this._eefPendingNudge;
+      if (!cfg) break;
+      try {
+        await this.sendEefDeltaStep(cfg.axis, cfg.sign, true);
+      } catch (_e) {
+        // Keep loop running unless user releases; transient errors are expected on weak links.
+      }
+      await this.sleep(120);
+    }
+  },
+
+  stopEefHoldNudge() {
+    this._eefHoldPressing = false;
+    if (this._eefHoldStartTimer) {
+      clearTimeout(this._eefHoldStartTimer);
+      this._eefHoldStartTimer = null;
+    }
+    const wasActive = this._eefHoldActive;
+    this._eefHoldActive = false;
+    this._eefPendingNudge = null;
+    this.setData({ eefHoldActive: false, eefHoldKey: '' });
+    if (wasActive) {
+      this.setData({ lastMsg: '末端连续微调已停止' });
+      this.refreshEefCurrent();
+    }
+  },
+
+  onEefNudgeTouchStart(e) {
+    const axis = String(e.currentTarget.dataset.axis || '').toLowerCase();
+    const sign = Number(e.currentTarget.dataset.sign || 1) >= 0 ? 1 : -1;
+    if (!axis) return;
+
+    this._eefHoldPressing = true;
+    this._eefPendingNudge = { axis, sign };
+    if (this._eefHoldStartTimer) {
+      clearTimeout(this._eefHoldStartTimer);
+    }
+
+    this._eefHoldStartTimer = setTimeout(() => {
+      this._eefHoldStartTimer = null;
+      if (!this._eefHoldPressing || !this._eefPendingNudge) {
+        return;
+      }
+      this._eefHoldActive = true;
+      this.setData({
+        lastMsg: '末端连续微调中，松开按钮即停止...',
+        eefHoldActive: true,
+        eefHoldKey: `${axis}:${sign}`,
+      });
+      this.runEefHoldLoop();
+    }, 260);
+  },
+
+  onEefNudgeTouchEnd() {
+    const pending = this._eefPendingNudge;
+    const startedHold = this._eefHoldActive;
+    this._eefHoldPressing = false;
+
+    if (this._eefHoldStartTimer) {
+      clearTimeout(this._eefHoldStartTimer);
+      this._eefHoldStartTimer = null;
+      if (!startedHold && pending) {
+        this.sendEefDeltaStep(pending.axis, pending.sign).then(() => this.refreshEefCurrent());
+      }
+    }
+
+    if (startedHold) {
+      this.stopEefHoldNudge();
+    } else {
+      this._eefPendingNudge = null;
+    }
+  },
+
+  onEefNudgeTouchCancel() {
+    this.stopEefHoldNudge();
+  },
+
+  onEefStopHold() {
+    this.stopEefHoldNudge();
+  },
+
+  onEefQuickLowerZ() {
+    this.sendEefDeltaStep('z', -1).then(() => this.refreshEefCurrent());
+  },
+
+  onEefQuickLevelRPY() {
+    const arm = this.data.eefArm || 'left';
+    const sendTime = clamp(toFloat(this.data.eefSendTime, 0.45), 0.1, 2.5);
+    const pose = [
+      toFloat(this.data.eefX, 0.0),
+      toFloat(this.data.eefY, 0.0),
+      toFloat(this.data.eefZ, 0.0),
+      0.0,
+      0.0,
+      0.0,
+    ];
+    this.runAction('姿态回正', async () => {
+      const resp = await this.req('/robot/arm/eef_adjust', 'POST', {
+        arm,
+        mode: 'absolute',
+        pose,
+        send_time_s: sendTime,
+      });
+      this.refreshEefCurrent();
+      return resp;
+    });
   },
 
   onTaskChange(e) {

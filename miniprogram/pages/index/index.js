@@ -5,6 +5,8 @@ const config = require('../../config');
 
 // 录音最长时间（秒）
 const MAX_RECORD_SECONDS = 60;
+const MIN_RECORD_DURATION_MS = 300;
+const RECORD_RESTART_COOLDOWN_MS = 500;
 
 function isPrivateIpv4Host(host) {
   const h = String(host || '').trim();
@@ -204,14 +206,24 @@ Page({
       wx.showToast({ title: '服务未连接，请检查设置', icon: 'none', duration: 2000 });
       return;
     }
+    if (this.data.isProcessing) {
+      wx.showToast({ title: '上一段语音还在处理中', icon: 'none', duration: 1800 });
+      return;
+    }
+    if (this._nextRecordStartAt && Date.now() < this._nextRecordStartAt) {
+      return;
+    }
+    this._recordTouchActive = true;
     this._startRecording();
   },
 
   onRecordEnd() {
+    this._recordTouchActive = false;
     this._stopRecording();
   },
 
   onRecordCancel() {
+    this._recordTouchActive = false;
     this._stopRecording();
   },
 
@@ -227,22 +239,34 @@ Page({
     this.recManager = recManager;
 
     recManager.onStart(() => {
+      this._recordStarting = false;
       this._recordStopping = false;
+      this._recordStartedAt = Date.now();
       console.log('[Rec] 开始录音');
       this.setData({ isRecording: true, recordDuration: 0, errorMsg: '' });
       this._startTimer();
+
+      // 若用户在 onStart 回调前已松开，立即补发 stop，避免“第一次松开不停录”。
+      if (this._pendingStopAfterStart || this._recordTouchActive === false) {
+        this._pendingStopAfterStart = false;
+        this._stopRecording();
+      }
     });
 
     recManager.onStop((res) => {
       console.log('[Rec] 停止录音', res);
+      this._recordStarting = false;
       this._recordStopping = false;
+      this._pendingStopAfterStart = false;
+      this._recordStartedAt = 0;
+      this._nextRecordStartAt = Date.now() + RECORD_RESTART_COOLDOWN_MS;
       if (this._stopFallbackTimer) {
         clearTimeout(this._stopFallbackTimer);
         this._stopFallbackTimer = null;
       }
       this._stopTimer();
       this.setData({ isRecording: false });
-      if (res.duration < 500) {
+      if (res.duration < MIN_RECORD_DURATION_MS) {
         wx.showToast({ title: '录音太短，请重试', icon: 'none' });
         return;
       }
@@ -251,7 +275,11 @@ Page({
 
     recManager.onError((err) => {
       console.error('[Rec] 录音错误', err);
+      this._recordStarting = false;
       this._recordStopping = false;
+      this._pendingStopAfterStart = false;
+      this._recordStartedAt = 0;
+      this._nextRecordStartAt = Date.now() + RECORD_RESTART_COOLDOWN_MS;
       if (this._stopFallbackTimer) {
         clearTimeout(this._stopFallbackTimer);
         this._stopFallbackTimer = null;
@@ -268,9 +296,12 @@ Page({
       this._showError('录音组件初始化失败', false);
       return;
     }
-    if (this.data.isRecording || this._recordStopping) {
+    if (this.data.isRecording || this._recordStopping || this._recordStarting) {
       return;
     }
+    this._recordStarting = true;
+    this._pendingStopAfterStart = false;
+    this._recordStartedAt = 0;
     this.recManager.start({
       duration: MAX_RECORD_SECONDS * 1000,
       sampleRate: 16000,
@@ -281,7 +312,17 @@ Page({
   },
 
   _stopRecording() {
-    if (!this.recManager || !this.data.isRecording || this._recordStopping) {
+    if (!this.recManager || this._recordStopping) {
+      return;
+    }
+
+    // 解决 start 回调前就松手的竞态：先记账，待 onStart 后立即 stop。
+    if (this._recordStarting) {
+      this._pendingStopAfterStart = true;
+      return;
+    }
+
+    if (!this.data.isRecording) {
       return;
     }
     this._recordStopping = true;
@@ -471,6 +512,11 @@ Page({
   },
 
   onUnload() {
+    this._recordTouchActive = false;
+    this._recordStarting = false;
+    this._pendingStopAfterStart = false;
+    this._recordStartedAt = 0;
+    this._nextRecordStartAt = 0;
     this._stopTimer();
     if (this._stopFallbackTimer) {
       clearTimeout(this._stopFallbackTimer);

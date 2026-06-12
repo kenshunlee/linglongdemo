@@ -78,6 +78,82 @@
   </view>
 
   <view class="card">
+    <text class="title">8. 末端位姿精调（标准档）</text>
+    <view class="chip-row">
+      <view class="chip {{eefArm==='left' ? 'chip-on' : ''}}" data-arm="left" bindtap="onEefArmChange">左手</view>
+      <view class="chip {{eefArm==='right' ? 'chip-on' : ''}}" data-arm="right" bindtap="onEefArmChange">右手</view>
+    </view>
+
+    <view class="input-row">
+      <text>插值时长(s)</text>
+      <input type="digit" value="{{eefSendTime}}" data-key="eefSendTime" bindinput="onEefInput" />
+    </view>
+    <view class="input-row">
+      <text>X(m)</text>
+      <input type="digit" value="{{eefX}}" data-key="eefX" bindinput="onEefInput" />
+    </view>
+    <view class="input-row">
+      <text>Y(m)</text>
+      <input type="digit" value="{{eefY}}" data-key="eefY" bindinput="onEefInput" />
+    </view>
+    <view class="input-row">
+      <text>Z(m)</text>
+      <input type="digit" value="{{eefZ}}" data-key="eefZ" bindinput="onEefInput" />
+    </view>
+    <view class="input-row">
+      <text>Roll(°)</text>
+      <input type="digit" value="{{eefRollDeg}}" data-key="eefRollDeg" bindinput="onEefInput" />
+    </view>
+    <view class="input-row">
+      <text>Pitch(°)</text>
+      <input type="digit" value="{{eefPitchDeg}}" data-key="eefPitchDeg" bindinput="onEefInput" />
+    </view>
+    <view class="input-row">
+      <text>Yaw(°)</text>
+      <input type="digit" value="{{eefYawDeg}}" data-key="eefYawDeg" bindinput="onEefInput" />
+    </view>
+
+    <view class="btn-grid">
+      <button class="btn" bindtap="onApplyEefAbsolute" loading="{{busy}}"><text class="btn-icon">◎</text><text class="btn-label">绝对位姿下发</text></button>
+      <button class="btn" bindtap="onApplyEefDelta" loading="{{busy}}"><text class="btn-icon">△</text><text class="btn-label">增量位姿下发</text></button>
+    </view>
+
+    <view class="btn-grid">
+      <button class="btn" bindtap="onEefQuickLowerZ" loading="{{busy}}"><text class="btn-icon">⇣</text><text class="btn-label">快速降高(Z-)</text></button>
+      <button class="btn" bindtap="onEefQuickLevelRPY" loading="{{busy}}"><text class="btn-icon">⊙</text><text class="btn-label">姿态回正(RPY=0)</text></button>
+    </view>
+
+    <view class="input-row">
+      <text>步进位置(m)</text>
+      <input type="digit" value="{{eefStepPos}}" data-key="eefStepPos" bindinput="onEefInput" />
+    </view>
+    <view class="input-row">
+      <text>步进姿态(°)</text>
+      <input type="digit" value="{{eefStepAttDeg}}" data-key="eefStepAttDeg" bindinput="onEefInput" />
+    </view>
+
+    <view class="nudge-grid">
+      <button class="btn {{eefHoldActive && eefHoldKey==='x:1' ? 'btn-hold-active' : ''}}" data-axis="x" data-sign="1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">X+</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='x:-1' ? 'btn-hold-active' : ''}}" data-axis="x" data-sign="-1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">X-</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='y:1' ? 'btn-hold-active' : ''}}" data-axis="y" data-sign="1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">Y+</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='y:-1' ? 'btn-hold-active' : ''}}" data-axis="y" data-sign="-1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">Y-</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='z:1' ? 'btn-hold-active' : ''}}" data-axis="z" data-sign="1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">Z+</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='z:-1' ? 'btn-hold-active' : ''}}" data-axis="z" data-sign="-1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">Z-</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='r:1' ? 'btn-hold-active' : ''}}" data-axis="r" data-sign="1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">R+</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='r:-1' ? 'btn-hold-active' : ''}}" data-axis="r" data-sign="-1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">R-</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='p:1' ? 'btn-hold-active' : ''}}" data-axis="p" data-sign="1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">P+</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='p:-1' ? 'btn-hold-active' : ''}}" data-axis="p" data-sign="-1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">P-</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='yaw:1' ? 'btn-hold-active' : ''}}" data-axis="yaw" data-sign="1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">Yaw+</button>
+      <button class="btn {{eefHoldActive && eefHoldKey==='yaw:-1' ? 'btn-hold-active' : ''}}" data-axis="yaw" data-sign="-1" bindtouchstart="onEefNudgeTouchStart" bindtouchend="onEefNudgeTouchEnd" bindtouchcancel="onEefNudgeTouchCancel" loading="{{busy}}">Yaw-</button>
+    </view>
+    <text class="hint">提示：短按=单步微调，长按=连续微调，松开即停。</text>
+    <button class="btn btn-stop" wx:if="{{eefHoldActive}}" bindtap="onEefStopHold">停止连续微调</button>
+
+    <text class="hint" wx:if="{{eefActualText}}">{{eefActualText}}</text>
+    <button class="btn btn-ghost" bindtap="refreshEefCurrent" loading="{{busy}}"><text class="btn-icon">↺</text><text class="btn-label">读取当前末端位姿</text></button>
+  </view>
+
+  <view class="card">
     <text class="title">10/11/12. 相机实时画面（ROS2压缩图）</text>
     <view class="chip-row">
       <view class="chip {{camera==='head' ? 'chip-on' : ''}}" data-camera="head" bindtap="onSelectCamera">头部相机</view>

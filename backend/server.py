@@ -258,8 +258,7 @@ def transcribe_with_zhipu_asr(audio_path: str) -> str:
     url = f"{ZHIPU_BASE_URL.rstrip('/')}/audio/transcriptions"
     payload = {
         "model": ZHIPU_ASR_MODEL,
-        "stream": "true",
-        # 该接口为非流式转写，multipart 场景下不要传字符串 "false"，避免 400
+        # 非流式转写不要传 stream 参数；传 "true" 会走流式限制（如 30 秒内）
         # 如需流式应走 SSE/stream 接口。
     }
     headers = {"Authorization": f"Bearer {ZHIPU_API_KEY}"}
