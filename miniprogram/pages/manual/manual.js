@@ -512,25 +512,108 @@ Page({
     }
   },
 
+  _decodeResponseText(data) {
+    if (!data) return '';
+    if (typeof data === 'string') return data;
+    if (data instanceof ArrayBuffer) {
+      try {
+        return String.fromCharCode.apply(null, Array.from(new Uint8Array(data)));
+      } catch (_e) {
+        return '';
+      }
+    }
+    return '';
+  },
+
+  _extractFrameError(res) {
+    const status = Number(res?.statusCode || 0);
+    if (!status || status < 400) {
+      return '';
+    }
+
+    let detail = '';
+    const text = this._decodeResponseText(res?.data);
+    if (text) {
+      try {
+        const parsed = JSON.parse(text);
+        detail = parsed?.detail || parsed?.message || '';
+      } catch (_e) {
+        detail = text.slice(0, 160);
+      }
+    }
+
+    if (status === 500 && !detail) {
+      detail = '后端相机未就绪（可能缺少 ROS2/cv2 依赖或未配置回退 URL）';
+    }
+    return `相机取帧失败（HTTP ${status}）${detail ? `: ${detail}` : ''}`;
+  },
+
+  _pollCameraFrame() {
+    if (!this.data.cameraPreviewOn) {
+      return;
+    }
+    if (this._cameraRequesting) {
+      return;
+    }
+
+    this._cameraRequesting = true;
+    const cam = this.data.camera || 'head';
+    const base = this.data.serverBase;
+    const url = `${base}/robot/camera/frame?camera=${cam}&ts=${Date.now()}`;
+
+    wx.request({
+      url,
+      method: 'GET',
+      responseType: 'arraybuffer',
+      timeout: 7000,
+      success: (res) => {
+        const errorText = this._extractFrameError(res);
+        if (errorText) {
+          this.setData({ cameraError: errorText });
+          return;
+        }
+
+        const ctypeRaw = (res?.header?.['content-type'] || res?.header?.['Content-Type'] || 'image/jpeg').toLowerCase();
+        const ctype = ctypeRaw.includes('png') ? 'image/png' : 'image/jpeg';
+        try {
+          const b64 = wx.arrayBufferToBase64(res.data);
+          this.setData({
+            cameraSrc: `data:${ctype};base64,${b64}`,
+            cameraError: '',
+          });
+        } catch (_e) {
+          this.setData({ cameraError: '相机帧解码失败，请检查后端返回格式' });
+        }
+      },
+      fail: (err) => {
+        const msg = (err && err.errMsg) ? err.errMsg : 'network error';
+        this.setData({ cameraError: `相机画面拉取失败: ${msg}` });
+      },
+      complete: () => {
+        this._cameraRequesting = false;
+        if (!this.data.cameraPreviewOn) {
+          return;
+        }
+        this._cameraTickTimer = setTimeout(() => this._pollCameraFrame(), 300);
+      },
+    });
+  },
+
   startCameraPreview() {
     this.stopCameraPreview();
-    this.setData({ cameraPreviewOn: true, cameraError: '' });
-
-    const tick = () => {
-      const src = `${this.data.serverBase}/robot/camera/frame?camera=${this.data.camera}&ts=${Date.now()}`;
-      this.setData({ cameraSrc: src });
-    };
-
-    tick();
-    const timer = setInterval(tick, 220);
-    this.setData({ cameraTimer: timer });
+    this._cameraRequesting = false;
+    this._cameraTickTimer = null;
+    this.setData({ cameraPreviewOn: true, cameraError: '', cameraSrc: '' });
+    this._pollCameraFrame();
   },
 
   stopCameraPreview() {
-    const timer = this.data.cameraTimer;
+    const timer = this._cameraTickTimer || this.data.cameraTimer;
     if (timer) {
-      clearInterval(timer);
+      clearTimeout(timer);
     }
+    this._cameraTickTimer = null;
+    this._cameraRequesting = false;
     this.setData({ cameraTimer: null, cameraPreviewOn: false });
   },
 
@@ -543,6 +626,6 @@ Page({
   },
 
   onCameraError() {
-    this.setData({ cameraError: '相机画面拉取失败，请检查后端 ROS2 话题订阅与网络，或配置 HTTP 回退相机 URL' });
+    this.setData({ cameraError: '相机画面显示失败，请检查后端取帧状态与网络连通性' });
   },
 });

@@ -65,6 +65,7 @@ def _as_bool(v: str | None, default: bool = False) -> bool:
 
 
 load_env_file(Path(__file__).with_name("cloud.env"))
+load_env_file(Path(__file__).with_name("cloud.env.local"))
 
 from robot_control import maybe_handle_robot_request, robot_service
 from reflow_client import ReflowClient, ReflowConfig
@@ -87,6 +88,7 @@ robot_service.mode_port = int(os.getenv("ROBOT_MODE_PORT", str(robot_service.mod
 ZHIPU_API_KEY = os.getenv("ZHIPU_API_KEY", "")
 ZHIPU_BASE_URL = os.getenv("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
 ZHIPU_ASR_MODEL = os.getenv("ZHIPU_ASR_MODEL", "glm-asr-2512")
+ZHIPU_VISION_MODEL = os.getenv("ZHIPU_VISION_MODEL", "glm-4.6v-flash")
 FALLBACK_MODEL = os.getenv("FALLBACK_MODEL", "phi3")
 PHI3_FIRST = os.getenv("PHI3_FIRST", "0") == "1"
 LOCAL_ASR_ENABLED = os.getenv("LOCAL_ASR_ENABLED", "1") == "1"
@@ -122,6 +124,7 @@ MISSION_ENABLED = _as_bool(os.getenv("MISSION_ENABLED", "1"), True)
 MISSION_DRY_RUN = _as_bool(os.getenv("MISSION_DRY_RUN", "1"), True)
 MISSION_DEFAULT_SPEED_MPS = float(os.getenv("MISSION_DEFAULT_SPEED_MPS", "0.18"))
 MISSION_AUTO_REFLOW = _as_bool(os.getenv("MISSION_AUTO_REFLOW", "1"), True)
+ROBOT_AUTO_POWER_ON_INIT = _as_bool(os.getenv("ROBOT_AUTO_POWER_ON_INIT", "1"), True)
 # ---------------------------------------------
 
 logging.basicConfig(
@@ -377,6 +380,24 @@ def smart_transcribe(audio_path: str) -> tuple[str, str]:
         return f"[转写失败] 所有引擎均不可用。错误：{e}", "none"
 
 
+def init_robot_on_startup() -> None:
+    if not ROBOT_AUTO_POWER_ON_INIT:
+        log.info("机器人上电初始化: 已关闭（ROBOT_AUTO_POWER_ON_INIT=0）")
+        return
+
+    if not getattr(robot_service, "enabled", False):
+        log.info("机器人上电初始化: 已跳过（ROBOT_SDK_ENABLED=0）")
+        return
+
+    try:
+        data = robot_service.init_robot()
+        msg = str(data.get("message") or "") if isinstance(data, dict) else ""
+        log.info(f"机器人上电初始化完成: {msg or 'ok'}")
+    except Exception as exc:
+        # 启动阶段不阻塞主服务，保留手动 /robot/init 兜底。
+        log.warning(f"机器人上电初始化失败（可稍后调用 /robot/init 重试）: {exc}")
+
+
 def get_health_payload() -> dict:
     if PHI3_FIRST:
         preferred_provider = "phi3"
@@ -391,6 +412,7 @@ def get_health_payload() -> dict:
         "asr_model": preferred_model,
         "phi3_first": PHI3_FIRST,
         "zhipu_configured": bool(ZHIPU_API_KEY),
+        "zhipu_vision_model": ZHIPU_VISION_MODEL,
         "local_asr_enabled": LOCAL_ASR_ENABLED,
         "local_asr_ready": bool(LOCAL_ASR_STATE.get("ready")),
         "local_asr_provider": LOCAL_ASR_STATE.get("provider"),
@@ -1065,6 +1087,7 @@ class ASRHandler(BaseHTTPRequestHandler):
 
 def main():
     init_local_asr()
+    init_robot_on_startup()
 
     log.info("ASR Bridge Service 启动中...")
     if LOCAL_ASR_STATE.get("ready"):

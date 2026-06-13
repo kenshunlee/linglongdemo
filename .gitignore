@@ -8,6 +8,10 @@ __pycache__/
 
 output/
 
+# 本地私有环境配置
+backend/cloud.env
+backend/cloud.env.local
+
 *.log
 .DS_Store
 Thumbs.db

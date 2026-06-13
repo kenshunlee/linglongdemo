@@ -134,9 +134,38 @@ class MissionController:
             self._robot_call(rt, "move", distance_m=1.2, speed_mps=options.get("default_speed_mps", 0.18))
 
             self._set_state(rt, MissionState.STALL_SEARCH)
-            head = self._fetch_frame("head")
-            detect = self._perception.detect_stall_and_item(head, rt.target.stall_label, rt.target.item_name)
-            self._log(rt, "head_detect", {"has_target": detect["has_target"]})
+            detect = {"has_target": False}
+            for idx in range(3):
+                self._check_stop(rt)
+                head = self._fetch_frame("head")
+                detect = self._perception.detect_stall_and_item(head, rt.target.stall_label, rt.target.item_name)
+                self._log(
+                    rt,
+                    "head_detect",
+                    {
+                        "attempt": idx + 1,
+                        "has_target": detect.get("has_target"),
+                        "stall_match": detect.get("stall_match"),
+                        "item_seen": detect.get("item_seen"),
+                        "confidence": detect.get("confidence"),
+                        "bbox": detect.get("bbox"),
+                        "center_offset_px": detect.get("center_offset_px"),
+                        "recommended_turn_deg": detect.get("recommended_turn_deg"),
+                        "recommended_move_m": detect.get("recommended_move_m"),
+                        "source": detect.get("source"),
+                    },
+                )
+
+                if detect.get("has_target"):
+                    turn_hint = float(detect.get("recommended_turn_deg") or 0.0)
+                    move_hint = float(detect.get("recommended_move_m") or 0.0)
+                    if abs(turn_hint) >= 3.0:
+                        self._robot_call(rt, "turn", angle_deg=max(-15.0, min(15.0, turn_hint)), angular_speed_dps=18.0)
+                    elif move_hint > 0.15:
+                        self._robot_call(rt, "move", distance_m=min(0.3, move_hint), speed_mps=0.08)
+                    break
+
+                self._robot_call(rt, "turn", angle_deg=12.0, angular_speed_dps=18.0)
 
             self._set_state(rt, MissionState.STALL_ALIGN)
             if not detect["has_target"]:
@@ -146,12 +175,18 @@ class MissionController:
                 time.sleep(1.0)
 
             self._set_state(rt, MissionState.ITEM_APPROACH)
+            head = self._fetch_frame("head")
+            approach = self._perception.detect_stall_and_item(head, rt.target.stall_label, rt.target.item_name)
+            if approach.get("has_target"):
+                move_hint = float(approach.get("recommended_move_m") or 0.0)
+                if move_hint > 0.05:
+                    self._robot_call(rt, "move", distance_m=min(0.25, move_hint), speed_mps=0.08)
             self._robot_call(rt, "move", distance_m=0.4, speed_mps=0.09)
 
             self._set_state(rt, MissionState.GRASP)
             left = self._fetch_frame("left")
             right = self._fetch_frame("right")
-            arm_choice = self._perception.choose_arm_by_wrist_view(left, right)
+            arm_choice = self._perception.choose_arm_by_wrist_view(left, right, rt.target.item_name)
             arm = arm_choice["arm"]
             self._log(rt, "arm_choice", arm_choice)
             self._robot_call(rt, "gripper", action="open", side=arm)
@@ -172,6 +207,8 @@ class MissionController:
             self._log(rt, "human_detect", human)
 
             self._set_state(rt, MissionState.HAND_APPROACH)
+            if not human.get("hand_detected"):
+                self._robot_call(rt, "turn", angle_deg=10.0)
             self._robot_call(rt, "arm_preset", arm=arm, preset="extend")
 
             self._set_state(rt, MissionState.RELEASE)
